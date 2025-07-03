@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "bagz"
-description="A format for storing a sequence of string records"
+description="A format for storing a sequence of byte-array records"
 license = {file = "LICENSE"}
 authors = [
     { name = "Charlie Beattie", email = "cbeattie@google.com" },
@@ -12,8 +12,29 @@ authors = [
     { name = "Nicolas Porcel", email = "nicolasporcel@google.com" },
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: File Formats",
+    "Topic :: Scientific/Engineering",
+]
+
 dynamic = ["version"]
+
+[project.urls]
+"Homepage" = "https://github.com/google-deepmind/bagz"
+"Bug Tracker" = "https://github.com/google-deepmind/bagz/issues"
 
 [tool.scikit-build]
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
@@ -25,7 +46,7 @@ cmake.args = ["-Wno-dev"]
 # We need openssl3, which is only available in newer versions of the build
 # image.
 manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:2024.12.16-1"
-build = "cp3*-manylinux_x86_64"
+build = "cp3*"
 build-frontend = "build[uv]"
 build-verbosity = 1
 test-command = "pytest {package}/src"
