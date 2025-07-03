@@ -1,0 +1,22 @@
+# System files
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyd
+*.so
+.Python
+env/
+venv/
+.venv/
+uv.lock
+
+# BUILD
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

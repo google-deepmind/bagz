@@ -1,0 +1,47 @@
+[build-system]
+requires = ["scikit-build-core>=0.9"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "bagz"
+description="A format for storing a sequence of string records"
+license = {file = "LICENSE"}
+authors = [
+    { name = "Charlie Beattie", email = "cbeattie@google.com" },
+    { name = "Augustin Žídek", email = "augustinzidek@google.com" },
+    { name = "Nicolas Porcel", email = "nicolasporcel@google.com" },
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+
+[tool.scikit-build]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
+cmake.args = ["-Wno-dev"]
+
+[tool.setuptools_scm]
+
+[tool.cibuildwheel]
+# We need openssl3, which is only available in newer versions of the build
+# image.
+manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:2024.12.16-1"
+build = "cp3*-manylinux_x86_64"
+build-frontend = "build[uv]"
+build-verbosity = 1
+test-command = "pytest {package}/src"
+test-requires = "pytest absl-py numpy"
+
+[tool.cibuildwheel.environment]
+TEST_TMPDIR = "${PWD}/test_tmpdir"
+
+[tool.cibuildwheel.linux]
+# Install libcurl and openssl3 and make sure that openssl3 can be found. In
+# CentOS, openssl3 will be suffixed, as openssl 1.1 is the default. This means
+# that cmake cannot find it at the usual location.
+before-all = '''
+yum install -y libcurl-devel openssl3-devel \
+    && ln -s openssl3/openssl /usr/include/openssl \
+    && ln -s libssl.so.3 /usr/lib64/libssl.so \
+    && ln -s libcrypto.so.3 /usr/lib64/libcrypto.so
+'''
+repair-wheel-command = ""
