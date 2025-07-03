@@ -9,7 +9,7 @@ index-based lookup. All indexing is zero based.
 ## Installation
 
 To install Bagz from source we recommend using
-[uv] (https://docs.astral.sh/uv/). The install will download required
+[uv](https://docs.astral.sh/uv/). The install will download required
 dependencies apart from curl (`libcurl-devel`) and OpenSSL (`openssl-devel`).
 These need to be installed in a location that cmake's `find_package` searches.
 
