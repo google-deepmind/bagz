@@ -17,6 +17,12 @@ These need to be installed in a location that cmake's `find_package` searches.
 uv pip install .
 ```
 
+On Linux you can install the latest version from PyPI.
+
+```sh
+uv pip install bagz
+```
+
 ## Python API
 
 ### Python Reader
