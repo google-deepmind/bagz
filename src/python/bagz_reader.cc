@@ -541,6 +541,8 @@ void RegisterBagzReader(py::module& m) {
                return *std::move(reverse_reader);
              }
            })
+      .def("approximate_bytes_per_record",
+           &BagzReader::ApproximateNumBytesPerRecord)
       .def("read",
            [](const BagzReader& reader) {
              return ReadRange(reader, 0, reader.size());

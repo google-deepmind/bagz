@@ -117,6 +117,11 @@ class BagzReader {
   // Returns the number of records in the bag.
   [[nodiscard]] size_t size() const;
 
+  // Returns the approximate number of (possibly compressed) bytes per record in
+  // the bag.
+  //
+  // This is an accurate value when the reader is created. When the reader is
+  // sliced this value is not updated and becomes an estimate.
   double ApproximateNumBytesPerRecord() const;
 
   // Returns the record at the given index.

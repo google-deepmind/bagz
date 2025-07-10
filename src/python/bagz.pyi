@@ -191,6 +191,13 @@ class Reader(Sequence[bytes]):
     Raises a ValueError if the value is not found.
     """
 
+  def approximate_bytes_per_record(self) -> float:
+    """Returns the approximate number of (possibly compressed) bytes per record in the reader.
+
+    This is an accurate value when the reader is created. When the reader is
+    sliced this value is not updated and becomes an estimate.
+    """
+
   def read(self) -> list[bytes]:
     """Returns all the records in the reader."""
 

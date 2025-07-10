@@ -51,6 +51,23 @@ def _all_slices(num_records: int) -> Iterator[slice]:
 
 class BagTest(parameterized.TestCase):
 
+  def test_approximate_bytes_per_record(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bag'
+    records = list(_generate_records(_NUM_RECORDS))
+    num_bytes = 0
+    with bagz.Writer(file) as writer:
+      for d in records:
+        num_bytes += len(d)
+        writer.write(d)
+    reader = bagz.Reader(file)
+    self.assertEqual(list(reader), records)
+    # Uncompressed records:
+    self.assertEqual(file.stat().st_size, num_bytes + len(records) * 8)
+    self.assertEqual(
+        int(reader.approximate_bytes_per_record() * len(records) + 0.5),
+        num_bytes,
+    )
+
   @parameterized.product(
       name=('data.bagz', 'data.bag'),
       limits_placement=(
@@ -77,20 +94,20 @@ class BagTest(parameterized.TestCase):
       compression: Compression | None,
       limits_storage: bagz.LimitsStorage | None,
   ) -> None:
-    filename = os.path.join(self.create_tempdir(), name)
+    file = pathlib.Path(self.create_tempdir()) / name
     records = list(_generate_records(_NUM_RECORDS))
     writer_options = dict(
         limits_placement=limits_placement,
         compression=compression,
     )
     writer_options = {k: v for k, v in writer_options.items() if v is not None}
-    with bagz.Writer(filename, bagz.Writer.Options(**writer_options)) as writer:
+    with bagz.Writer(file, bagz.Writer.Options(**writer_options)) as writer:
       for d in records:
         writer.write(d)
 
     reader_options = dict(**writer_options, limits_storage=limits_storage)
     reader_options = {k: v for k, v in reader_options.items() if v is not None}
-    reader = bagz.Reader(filename, bagz.Reader.Options(**reader_options))
+    reader = bagz.Reader(file, bagz.Reader.Options(**reader_options))
 
     all_indices = np.arange(len(records), dtype=np.int64)
 
@@ -184,12 +201,12 @@ class BagTest(parameterized.TestCase):
 
   def test_pathlib(self) -> None:
     root = pathlib.Path('/posix:' + os.fspath(self.create_tempdir()))
-    filename = root / 'data.bagz'
+    file = root / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(filename, bagz.Writer.Options()) as writer:
+    with bagz.Writer(file, bagz.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
-    reader = bagz.Reader(filename, bagz.Reader.Options())
+    reader = bagz.Reader(file, bagz.Reader.Options())
     self.assertEqual(list(reader), records)
 
   def test_file_not_found(self) -> None:
@@ -216,35 +233,35 @@ class BagTest(parameterized.TestCase):
       limits_placement: bagz.LimitsPlacement | None,
       compression: Compression | None,
   ) -> None:
-    filename = os.path.join(self.create_tempdir(), name)
+    file = pathlib.Path(self.create_tempdir()) / name
     records = list(_generate_records(_NUM_RECORDS))
     options = dict(limits_placement=limits_placement, compression=compression)
     options = {k: v for k, v in options.items() if v is not None}
-    writer = bagz.Writer(filename, bagz.Writer.Options(**options))
+    writer = bagz.Writer(file, bagz.Writer.Options(**options))
     for d in records:
       writer.write(d)
     writer.flush()
     writer.close()
-    reader = bagz.Reader(filename, bagz.Reader.Options(**options))
+    reader = bagz.Reader(file, bagz.Reader.Options(**options))
     self.assertEqual(list(reader), records)
 
   def test_read_all(self) -> None:
-    filename = os.path.join(self.create_tempdir(), 'data.bagz')
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(filename, bagz.Writer.Options()) as writer:
+    with bagz.Writer(file, bagz.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
-    reader = bagz.Reader(filename, bagz.Reader.Options())
+    reader = bagz.Reader(file, bagz.Reader.Options())
     self.assertEqual(reader.read(), records)
 
   def test_sequence_methods(self) -> None:
-    filename = os.path.join(self.create_tempdir(), 'data.bagz')
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(filename, bagz.Writer.Options()) as writer:
+    with bagz.Writer(file, bagz.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
 
-    reader = bagz.Reader(filename, bagz.Reader.Options())
+    reader = bagz.Reader(file, bagz.Reader.Options())
 
     with self.subTest('index'):
       self.assertEqual(reader.index(records[0]), 0)
@@ -275,13 +292,13 @@ class BagTest(parameterized.TestCase):
       self.assertSequenceEqual(reversed_reader, list(reader)[::-1])
 
   def test_slice_reader(self) -> None:
-    filename = os.path.join(self.create_tempdir(), 'data.bagz')
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(filename, bagz.Writer.Options()) as writer:
+    with bagz.Writer(file, bagz.Writer.Options()) as writer:
       for d in records:
         writer.write(d)
 
-    reader = bagz.Reader(filename, bagz.Reader.Options())
+    reader = bagz.Reader(file, bagz.Reader.Options())
     self.assertIsInstance(reader, Sequence)
     all_values = reader.read_range(0, _NUM_RECORDS)
 
@@ -307,14 +324,14 @@ class BagTest(parameterized.TestCase):
       _ = reader[slice('Not a number')]
 
   def test_iterator(self) -> None:
-    filename = os.path.join(self.create_tempdir(), 'data.bagz')
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(filename) as writer:
+    with bagz.Writer(file) as writer:
       for d in records:
         writer.write(d)
     all_indices = np.arange(len(records))
     np.random.default_rng(42).shuffle(all_indices)
-    reader = bagz.Reader(filename, bagz.Reader.Options())
+    reader = bagz.Reader(file, bagz.Reader.Options())
     for row, (index, record_index_iter, record_from_index) in enumerate(
         zip(
             all_indices,
@@ -329,12 +346,12 @@ class BagTest(parameterized.TestCase):
 
   @parameterized.product(read_ahead=[None, 3, 4, 5])
   def test_iterator_with_exception(self, read_ahead: int | None) -> None:
-    filename = os.path.join(self.create_tempdir(), 'data.bagz')
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
-    with bagz.Writer(filename) as writer:
+    with bagz.Writer(file) as writer:
       for d in records:
         writer.write(d)
-    reader = bagz.Reader(filename)
+    reader = bagz.Reader(file)
 
     class NotImplementedIterator(Iterable[int]):
 
