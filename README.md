@@ -8,10 +8,10 @@ index-based lookup. All indexing is zero based.
 
 ## Installation
 
-To install Bagz from source we recommend using
-[uv](https://docs.astral.sh/uv/). The install will download required
-dependencies apart from curl (`libcurl-devel`) and OpenSSL (`openssl-devel`).
-These need to be installed in a location that cmake's `find_package` searches.
+To install Bagz from source we recommend using [uv](https://docs.astral.sh/uv/).
+The install will download required dependencies apart from curl
+(`libcurl-devel`) and OpenSSL (`openssl-devel`). These need to be installed in a
+location that cmake's `find_package` searches.
 
 ```sh
 uv pip install .
@@ -176,11 +176,61 @@ with bagz.Writer(
     *   `bagz.LimitsPlacement.TAIL`: Default - Writes limits to a tail of file.
     *   `bagz.LimitsPlacement.SEPARATE`: Writes limits to a separate file.
 
+## Apache Beam Support
+
+Bagz also provides Apache Beam connectors for reading and writing Bagz files in
+Beam pipelines.
+
+Ensure you have Apache Beam installed.
+```sh
+uv pip install apache_beam
+```
+
+### Bagz Source
+
+```python
+import apache_beam as beam
+from bagz.beam import bagzio
+import tensorflow as tf
+
+with beam.Pipeline() as pipeline:
+  examples = (
+      pipeline
+      | 'ReadData' >> bagzio.ReadFromBagz('/path/to/your/data@*.bagz')
+      | 'Decode' >> beam.Map(tf.train.Example.FromString)
+  )
+  # Continue your pipeline.
+```
+
+#### Bagz Sink
+
+```python
+from bagz.beam import bagzio
+import tensorflow as tf
+
+def create_tf_example(data):
+  # Replace with your actual feature creation logic.
+  feature = {
+      'data': tf.train.Feature(bytes_list=tf.train.BytesList(value=[data])),
+  }
+  return tf.train.Example(features=tf.train.Features(feature=feature))
+
+with beam.Pipeline() as pipeline:
+  data = [b'record1', b'record2', b'record3']
+
+  examples = (
+      pipeline
+      | 'CreateData' >> beam.Create(data)
+      | 'Encode' >> beam.Map(lambda x: create_tf_example(x).SerializeToString())
+      | 'WriteData' >> bagzio.WriteToBagz('/path/to/output/data@*.bagz')
+  )
+```
+
 ## GCS Support
 
 Bagz supports Posix file-systems and Google Cloud Storage (GCS). If you have
-files on GCS you can access them with using the prefix `/gs:` to the path.
-These examples assume you have gcloud CLI installed.
+files on GCS you can access them with using the prefix `/gs:` to the path. These
+examples assume you have gcloud CLI installed.
 
 From the shell:
 
