@@ -172,7 +172,7 @@ file(WRITE ${CMAKE_BINARY_DIR}/__init__.py [[# Copyright 2025 Google LLC
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .lib.bagz import *
+from bagz.lib.bagz import *
 ]])
 
 install(

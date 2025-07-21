@@ -65,4 +65,5 @@ yum install -y libcurl-devel openssl3-devel \
     && ln -s libssl.so.3 /usr/lib64/libssl.so \
     && ln -s libcrypto.so.3 /usr/lib64/libcrypto.so
 '''
-repair-wheel-command = ""
+
+repair-wheel-command = "auditwheel repair --strip -w {dest_dir} {wheel}"
