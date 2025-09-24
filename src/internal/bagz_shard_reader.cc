@@ -79,7 +79,7 @@ absl::StatusOr<BagzShardReader::ByteRange> BagzShardReader::ReadByteRange(
   }
 
   if (range[0] <= range[1] && range[1] <= records_size) {
-    return ByteRange(range[0], range[1] - range[0]);
+    return ByteRange{range[0], range[1] - range[0]};
   } else {
     return absl::InvalidArgumentError("Bad file format.");
   }
