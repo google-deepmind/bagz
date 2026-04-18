@@ -16,6 +16,7 @@
 #include "absl/log/absl_check.h"
 #include "src/file/file_systems/gcs/gcs_file_system.h"
 #include "src/file/file_systems/posix/posix_file_system.h"
+#include "src/file/file_systems/s3/s3_file_system.h"
 #include "src/file/registry/file_system_registry.h"
 
 namespace bagz {
@@ -23,9 +24,11 @@ namespace bagz {
 void RegisterFileSystems(FileSystemRegistry& register_fs) {
   static absl::NoDestructor<PosixFileSystem> posix_fs;
   static absl::NoDestructor<bagz::GcsFileSystem> gcs_fs;
+  static absl::NoDestructor<bagz::S3FileSystem> s3_fs;
 
   ABSL_CHECK_OK(register_fs.Register("gs:", *gcs_fs));
   ABSL_CHECK_OK(register_fs.Register("posix:", *posix_fs));
+  ABSL_CHECK_OK(register_fs.Register("s3:", *s3_fs));
 
   // Set the default file system.
   ABSL_CHECK_OK(register_fs.Register("", *posix_fs));

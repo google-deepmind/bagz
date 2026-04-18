@@ -32,6 +32,7 @@ include(cmake/third_party_absl.cmake)
 include(cmake/third_party_pybind11.cmake)
 include(cmake/third_party_zstd.cmake)
 include(cmake/third_party_gcs.cmake)
+include(cmake/third_party_aws.cmake)
 
 # Restore original CXX_FLAGS
 set(CMAKE_CXX_FLAGS "${SAVED_CMAKE_CXX_FLAGS}")
@@ -107,6 +108,27 @@ bagz_cc_library(
     google-cloud-cpp::storage
 )
 
+file(GLOB bagz_file_system_s3_sources "src/file/file_systems/s3/*.cc")
+file(GLOB bagz_file_system_s3_headers "src/file/file_systems/s3/*.h")
+
+bagz_cc_library(
+  bagz_file_system_s3
+  SOURCES ${bagz_file_system_s3_sources}
+  HEADERS ${bagz_file_system_s3_headers}
+  DEPS
+    absl::log
+    absl::status
+    absl::statusor
+    absl::strings
+    bagz_file_system
+    bagz_internal
+    aws-cpp-sdk-s3
+    aws-cpp-sdk-core
+    GTest::gtest
+    GTest::gtest_main
+    GTest::gmock
+)
+
 file(GLOB bagz_file_sources "src/file/*.cc"  "src/file/registry/*.cc")
 file(GLOB bagz_file_headers "src/file/*.h" "src/file/registry/*.h")
 
@@ -123,7 +145,10 @@ bagz_cc_library(
     bagz_file_system
     bagz_file_system_posix
     bagz_file_system_gcs
+    bagz_file_system_s3
     google-cloud-cpp::storage
+    aws-cpp-sdk-s3
+    aws-cpp-sdk-core
 )
 
 file(GLOB bagz_core_sources "src/*.cc")
