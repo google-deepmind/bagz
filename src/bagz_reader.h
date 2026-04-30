@@ -62,6 +62,26 @@ class BagzReader {
     // many threads/fibers.
     int max_parallelism = 100;
 
+    // Maximum number of parallel file opens during the bulk-open phase
+    // (file_system->BulkOpenPRead).  Kept lower than `max_parallelism` because
+    // the open phase has different concurrency economics than the read phase:
+    //
+    //   * Each open issues a fresh GCS metadata request that requires a DNS
+    //     resolution, and on macOS libcurl uses a per-call threaded resolver
+    //     (`CURLRES_THREADED`).  At high concurrency, rapid `pthread_create`
+    //     calls for resolver threads can return EAGAIN, surfacing as
+    //     `CURLE_FAILED_INIT` (curl error 2).  The open-phase cap bounds that
+    //     burst.
+    //   * The opens are GCS-latency bound; past ~16-32 in flight there is no
+    //     wall-clock benefit, only resolver-thread pressure.
+    //   * The read phase reuses connections from the GCS client's pool, so it
+    //     does not create resolver threads at the same rate and can safely
+    //     run with `max_parallelism`.
+    //
+    // Values <= 0 mean "use the file-system default" (currently 100 in the
+    // base FileSystem implementation, retained for backward compatibility).
+    int bulk_open_max_parallelism = 16;
+
     constexpr static size_t kDefaultReadAheadBytes = 1024 * 1024;  // 1 MiB
     // Number of bytes to read ahead when iterating.
     std::optional<size_t> read_ahead_bytes;

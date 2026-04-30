@@ -59,9 +59,13 @@ class FileSystem {
 
   // Opens a set of files for reading. See file_system/shard_spec.h for details
   // on the filespec format.
+  //
+  // `max_parallelism` caps the number of worker threads used to fan out
+  // per-file open calls.  Values <= 0 mean "use the file-system default"
+  // (the base FileSystem implementation uses 100).
   virtual absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                absl::string_view options) const;
+                absl::string_view options, int max_parallelism = 0) const;
 };
 
 }  // namespace bagz

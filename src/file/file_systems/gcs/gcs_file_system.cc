@@ -50,7 +50,7 @@
 namespace bagz {
 namespace {
 
-constexpr int kMaxParallelism = 100;
+constexpr int kDefaultMaxParallelism = 100;
 
 namespace gc = ::google::cloud;
 namespace gcs = gc::storage;
@@ -219,7 +219,8 @@ absl::Status GcsFileSystem::Delete(absl::string_view filename_without_prefix,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                             absl::string_view options) const {
+                             absl::string_view options,
+                             int max_parallelism) const {
   std::vector<std::string> expanded_filespec =
       ExpandShardSpec(filespec_without_prefix);
 
@@ -227,6 +228,8 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
       expanded_filespec.size());
   gcs::Client* client = Client();
 
+  const int effective_parallelism =
+      max_parallelism > 0 ? max_parallelism : kDefaultMaxParallelism;
   if (absl::Status status = internal::ParallelDo(
           expanded_filespec.size(),
           [&expanded_filespec, &files_per_shard_spec,
@@ -271,7 +274,7 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
 
             return absl::OkStatus();
           },
-          kMaxParallelism, /*cpu_bound=*/false);
+          effective_parallelism, /*cpu_bound=*/false);
       !status.ok()) {
     return status;
   }

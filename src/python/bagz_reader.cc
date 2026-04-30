@@ -118,6 +118,10 @@ Args:
     cache the limits in memory.
   max_parallelism: Maximum number of threads to use for operations that can be
     parallelized.
+  bulk_open_max_parallelism: Maximum number of parallel file opens during the
+    bulk-open phase.  Defaults to 16 to avoid bursts of libcurl resolver-thread
+    creation that can cause CURLE_FAILED_INIT on macOS at high N.  See
+    bagz_reader.h for details.
 )";
 
 constexpr char kInitDoc[] = R"(
@@ -504,25 +508,31 @@ void RegisterBagzReader(py::module& m) {
       .def(
           py::init([](ShardingLayout sharding_layout,
                       LimitsPlacement limits_placement, Compression compression,
-                      LimitsStorage limits_storage, int max_parallelism) {
+                      LimitsStorage limits_storage, int max_parallelism,
+                      int bulk_open_max_parallelism) {
             return BagzReader::Options{
                 .sharding_layout = sharding_layout,
                 .limits_placement = limits_placement,
                 .compression = compression,
                 .limits_storage = limits_storage,
                 .max_parallelism = max_parallelism,
+                .bulk_open_max_parallelism = bulk_open_max_parallelism,
             };
           }),
           py::arg("sharding_layout") = BagzReader::Options{}.sharding_layout,
           py::arg("limits_placement") = BagzReader::Options{}.limits_placement,
           py::arg("compression") = BagzReader::Options{}.compression,
           py::arg("limits_storage") = BagzReader::Options{}.limits_storage,
-          py::arg("max_parallelism") = BagzReader::Options{}.max_parallelism)
+          py::arg("max_parallelism") = BagzReader::Options{}.max_parallelism,
+          py::arg("bulk_open_max_parallelism") =
+              BagzReader::Options{}.bulk_open_max_parallelism)
       .def_readwrite("sharding_layout", &BagzReader::Options::sharding_layout)
       .def_readwrite("limits_placement", &BagzReader::Options::limits_placement)
       .def_readwrite("compression", &BagzReader::Options::compression)
       .def_readwrite("limits_storage", &BagzReader::Options::limits_storage)
-      .def_readwrite("max_parallelism", &BagzReader::Options::max_parallelism);
+      .def_readwrite("max_parallelism", &BagzReader::Options::max_parallelism)
+      .def_readwrite("bulk_open_max_parallelism",
+                     &BagzReader::Options::bulk_open_max_parallelism);
 
   reader
       .def(py::init(&Init), py::arg("file_spec"),

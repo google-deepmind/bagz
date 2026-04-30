@@ -32,15 +32,18 @@ namespace bagz {
 
 namespace {
 
-constexpr int kMaxParallelism = 100;
+constexpr int kDefaultMaxParallelism = 100;
 
 }  // namespace
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                          absl::string_view options) const {
+                          absl::string_view options,
+                          int max_parallelism) const {
   std::vector<std::string> filenames = ExpandShardSpec(filespec_without_prefix);
   std::vector<std::unique_ptr<PReadFile>> files(filenames.size());
+  const int effective_parallelism =
+      max_parallelism > 0 ? max_parallelism : kDefaultMaxParallelism;
   if (absl::Status status = internal::ParallelDo(
           filenames.size(),
           [&](size_t file_index) -> absl::Status {
@@ -54,7 +57,7 @@ FileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
             files[file_index] = *std::move(file);
             return absl::OkStatus();
           },
-          /* max_parallelism */ kMaxParallelism, /*cpu_bound=*/false);
+          effective_parallelism, /*cpu_bound=*/false);
       !status.ok()) {
     return status;
   }
