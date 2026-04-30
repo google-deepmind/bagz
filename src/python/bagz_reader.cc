@@ -119,9 +119,10 @@ Args:
   max_parallelism: Maximum number of threads to use for operations that can be
     parallelized.
   bulk_open_max_parallelism: Maximum number of parallel file opens during the
-    bulk-open phase.  Defaults to 16 to avoid bursts of libcurl resolver-thread
-    creation that can cause CURLE_FAILED_INIT on macOS at high N.  See
-    bagz_reader.h for details.
+    bulk-open phase.  Defaults to 32 — the empirical sweet spot for in-region
+    GCS opens, while staying clear of the libcurl resolver-thread EAGAIN
+    regime that surfaces around p=64+ on macOS.  See bagz_reader.h for
+    details.
 )";
 
 constexpr char kInitDoc[] = R"(

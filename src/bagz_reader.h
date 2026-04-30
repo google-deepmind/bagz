@@ -72,15 +72,21 @@ class BagzReader {
     //     calls for resolver threads can return EAGAIN, surfacing as
     //     `CURLE_FAILED_INIT` (curl error 2).  The open-phase cap bounds that
     //     burst.
-    //   * The opens are GCS-latency bound; past ~16-32 in flight there is no
-    //     wall-clock benefit, only resolver-thread pressure.
+    //   * In-region the open phase is GCS-latency bound; past ~32 in flight
+    //     there is no wall-clock benefit, only resolver-thread pressure.
+    //     A 1334-shard sweep on a same-region GCE n2-standard-8 found p=32
+    //     ~25% faster than p=16, with p=64 and p=100 regressing.
+    //   * Cross-region (high RTT) clients want more — RTT-bound work overlaps
+    //     well — but 32 is a small ~1s cost relative to the optimum and stays
+    //     clear of the pthread_create EAGAIN regime that triggers above ~p=64
+    //     on macOS.
     //   * The read phase reuses connections from the GCS client's pool, so it
     //     does not create resolver threads at the same rate and can safely
     //     run with `max_parallelism`.
     //
     // Values <= 0 mean "use the file-system default" (currently 100 in the
     // base FileSystem implementation, retained for backward compatibility).
-    int bulk_open_max_parallelism = 16;
+    int bulk_open_max_parallelism = 32;
 
     constexpr static size_t kDefaultReadAheadBytes = 1024 * 1024;  // 1 MiB
     // Number of bytes to read ahead when iterating.
