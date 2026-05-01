@@ -67,9 +67,9 @@ class GcsFileSystem : public FileSystem {
   // the leading `gs:`.
   //
   // `max_parallelism` caps the number of worker threads used to issue
-  // ListObjects requests in parallel.  Values <= 0 mean "use the default"
-  // (100).  See bagz_reader.h's `Options::bulk_open_max_parallelism` for the
-  // motivation behind a tighter cap on macOS.
+  // ListObjects requests in parallel.  Values <= 0 mean "use the default",
+  // which is tuned in gcs_file_system.cc — see
+  // `kDefaultBulkOpenMaxParallelism` there for the rationale.
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
                 absl::string_view options,

@@ -119,10 +119,11 @@ Args:
   max_parallelism: Maximum number of threads to use for operations that can be
     parallelized.
   bulk_open_max_parallelism: Maximum number of parallel file opens during the
-    bulk-open phase.  Defaults to 32 — the empirical sweet spot for in-region
-    GCS opens, while staying clear of the libcurl resolver-thread EAGAIN
-    regime that surfaces around p=64+ on macOS.  See bagz_reader.h for
-    details.
+    bulk-open phase.  Values <= 0 (the default) mean "use the file-system
+    default", which is tuned per-backend (e.g. the GCS backend caps lower
+    than posix because the open phase saturates on DNS resolution past a
+    point and higher parallelism only adds fd pressure).  Override only if
+    you have measured a benefit for your workload.
 )";
 
 constexpr char kInitDoc[] = R"(

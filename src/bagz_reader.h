@@ -63,30 +63,14 @@ class BagzReader {
     int max_parallelism = 100;
 
     // Maximum number of parallel file opens during the bulk-open phase
-    // (file_system->BulkOpenPRead).  Kept lower than `max_parallelism` because
-    // the open phase has different concurrency economics than the read phase:
-    //
-    //   * Each open issues a fresh GCS metadata request that requires a DNS
-    //     resolution, and on macOS libcurl uses a per-call threaded resolver
-    //     (`CURLRES_THREADED`).  At high concurrency, rapid `pthread_create`
-    //     calls for resolver threads can return EAGAIN, surfacing as
-    //     `CURLE_FAILED_INIT` (curl error 2).  The open-phase cap bounds that
-    //     burst.
-    //   * In-region the open phase is GCS-latency bound; past ~32 in flight
-    //     there is no wall-clock benefit, only resolver-thread pressure.
-    //     A 1334-shard sweep on a same-region GCE n2-standard-8 found p=32
-    //     ~25% faster than p=16, with p=64 and p=100 regressing.
-    //   * Cross-region (high RTT) clients want more — RTT-bound work overlaps
-    //     well — but 32 is a small ~1s cost relative to the optimum and stays
-    //     clear of the pthread_create EAGAIN regime that triggers above ~p=64
-    //     on macOS.
-    //   * The read phase reuses connections from the GCS client's pool, so it
-    //     does not create resolver threads at the same rate and can safely
-    //     run with `max_parallelism`.
-    //
-    // Values <= 0 mean "use the file-system default" (currently 100 in the
-    // base FileSystem implementation, retained for backward compatibility).
-    int bulk_open_max_parallelism = 32;
+    // (file_system->BulkOpenPRead).  Values <= 0 mean "use the file-system
+    // default", which is the right choice for nearly all callers: each
+    // backend picks a default tuned to its own concurrency economics (e.g.
+    // the GCS backend caps lower than posix because past ~32 in flight the
+    // open phase is bound by DNS resolution rather than throughput, and
+    // higher parallelism only increases fd pressure).  Override only if
+    // you have measured a benefit on your specific workload and backend.
+    int bulk_open_max_parallelism = 0;
 
     constexpr static size_t kDefaultReadAheadBytes = 1024 * 1024;  // 1 MiB
     // Number of bytes to read ahead when iterating.

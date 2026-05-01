@@ -52,6 +52,24 @@ namespace {
 
 constexpr int kDefaultMaxParallelism = 100;
 
+// Default cap on the number of parallel object opens during BulkOpenPRead.
+// Kept well below `kDefaultMaxParallelism` because the open phase has
+// different concurrency economics than the read phase:
+//
+//   * Each open issues a fresh GCS metadata request that requires a DNS
+//     resolution.  Past a certain point those resolutions saturate and
+//     additional parallelism just produces an address-resolution storm
+//     with no wall-clock benefit.  In-region the open phase is GCS-latency
+//     bound; a 1334-shard sweep on a same-region GCE n2-standard-8 found
+//     p=32 ~25% faster than p=16, with p=64 and p=100 regressing.
+//   * Each in-flight open also holds a socket fd, so high parallelism
+//     raises the risk of fd exhaustion under burst load.  The lower cap
+//     keeps headroom against the process fd limit.
+//   * The read phase reuses connections from the GCS client's pool, so it
+//     does not pay the same per-call resolution cost and can safely run
+//     with the larger `kDefaultMaxParallelism`.
+constexpr int kDefaultBulkOpenMaxParallelism = 32;
+
 namespace gc = ::google::cloud;
 namespace gcs = gc::storage;
 
@@ -229,7 +247,7 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
   gcs::Client* client = Client();
 
   const int effective_parallelism =
-      max_parallelism > 0 ? max_parallelism : kDefaultMaxParallelism;
+      max_parallelism > 0 ? max_parallelism : kDefaultBulkOpenMaxParallelism;
   if (absl::Status status = internal::ParallelDo(
           expanded_filespec.size(),
           [&expanded_filespec, &files_per_shard_spec,
