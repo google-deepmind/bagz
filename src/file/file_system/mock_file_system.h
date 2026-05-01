@@ -177,7 +177,8 @@ class MockFileSystem : public FileSystem {
   MOCK_METHOD(
       absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>,
       BulkOpenPRead,
-      (absl::string_view filespec_without_prefix, absl::string_view options),
+      (absl::string_view filespec_without_prefix, absl::string_view options,
+       int max_parallelism),
       (const, override));
 };
 

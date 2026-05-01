@@ -608,7 +608,8 @@ absl::StatusOr<BagzReader> BagzReader::Open(absl::string_view filespec,
   absl::Span<std::unique_ptr<PReadFile>> limits_files;
   if (options.limits_placement == LimitsPlacement::kSeparate) {
     all_files = file::BulkOpenPRead(
-        absl::StrCat(filespec, ",", internal::LimitsName(filespec)));
+        absl::StrCat(filespec, ",", internal::LimitsName(filespec)),
+        /*options=*/{}, options.bulk_open_max_parallelism);
     if (!all_files.ok()) {
       return all_files.status();
     }
@@ -616,7 +617,8 @@ absl::StatusOr<BagzReader> BagzReader::Open(absl::string_view filespec,
     record_files = absl::MakeSpan(*all_files).subspan(0, num_files);
     limits_files = absl::MakeSpan(*all_files).subspan(num_files);
   } else {
-    all_files = file::BulkOpenPRead(filespec);
+    all_files = file::BulkOpenPRead(filespec, /*options=*/{},
+                                    options.bulk_open_max_parallelism);
     if (!all_files.ok()) {
       return all_files.status();
     }

@@ -48,7 +48,8 @@ class PosixFileSystem : public FileSystem {
 
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                absl::string_view options) const override;
+                absl::string_view options,
+                int max_parallelism = 0) const override;
 };
 
 }  // namespace bagz

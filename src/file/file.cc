@@ -107,7 +107,7 @@ absl::Status Delete(absl::string_view filename_with_prefix,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 BulkOpenPRead(absl::string_view file_spec_with_prefix,
-              absl::string_view options) {
+              absl::string_view options, int max_parallelism) {
   // Group files by prefix. Only groups files with contiguous prefixes. To
   // save book keeping.
   std::vector<std::pair<FileSystem*, std::vector<absl::string_view>>>
@@ -131,7 +131,7 @@ BulkOpenPRead(absl::string_view file_spec_with_prefix,
   for (const auto& [file_system, filenames] : filenames_from_prefix) {
     std::string file_spec = absl::StrJoin(filenames, ",");
     absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>> files =
-        file_system->BulkOpenPRead(file_spec, options);
+        file_system->BulkOpenPRead(file_spec, options, max_parallelism);
     if (!files.ok()) {
       return Error(files.status(), "BulkOpenPRead", file_spec_with_prefix);
     }

@@ -65,9 +65,15 @@ class GcsFileSystem : public FileSystem {
   // on the filespec format.
   // `filename_without_prefix` should be the URI of the object on GCS without
   // the leading `gs:`.
+  //
+  // `max_parallelism` caps the number of worker threads used to issue
+  // ListObjects requests in parallel.  Values <= 0 mean "use the default",
+  // which is tuned in gcs_file_system.cc — see
+  // `kDefaultBulkOpenMaxParallelism` there for the rationale.
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
-                absl::string_view options) const override;
+                absl::string_view options,
+                int max_parallelism = 0) const override;
 
  private:
   google::cloud::storage::Client* absl_nonnull Client() const;

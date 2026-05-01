@@ -200,7 +200,8 @@ absl::Status PosixFileSystem::Delete(absl::string_view filename,
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 PosixFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
-                               absl::string_view options) const {
+                               absl::string_view options,
+                               int max_parallelism) const {
   std::string filespec = CanonicaliseShardSpec(
       filespec_without_prefix, [](const std::string& pattern) {
         glob_t glob_result;
@@ -213,7 +214,7 @@ PosixFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
         return std::string(glob_result.gl_pathv[glob_result.gl_pathc - 1]);
       });
 
-  return FileSystem::BulkOpenPRead(filespec, options);
+  return FileSystem::BulkOpenPRead(filespec, options, max_parallelism);
 }
 
 }  // namespace bagz

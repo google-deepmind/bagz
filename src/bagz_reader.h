@@ -62,6 +62,16 @@ class BagzReader {
     // many threads/fibers.
     int max_parallelism = 100;
 
+    // Maximum number of parallel file opens during the bulk-open phase
+    // (file_system->BulkOpenPRead).  Values <= 0 mean "use the file-system
+    // default", which is the right choice for nearly all callers: each
+    // backend picks a default tuned to its own concurrency economics (e.g.
+    // the GCS backend caps lower than posix because past ~32 in flight the
+    // open phase is bound by DNS resolution rather than throughput, and
+    // higher parallelism only increases fd pressure).  Override only if
+    // you have measured a benefit on your specific workload and backend.
+    int bulk_open_max_parallelism = 0;
+
     constexpr static size_t kDefaultReadAheadBytes = 1024 * 1024;  // 1 MiB
     // Number of bytes to read ahead when iterating.
     std::optional<size_t> read_ahead_bytes;

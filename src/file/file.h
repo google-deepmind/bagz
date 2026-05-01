@@ -81,9 +81,16 @@ absl::Status Delete(absl::string_view filename_with_prefix,
 // Comma separated file_specs are allowed to have different prefixes.
 //
 // `options` are passed to the underlying file system.
+//
+// `max_parallelism` caps the number of worker threads used to fan out the
+// per-file open calls.  Values <= 0 mean "use the file-system default"
+// (currently 100).  Lower values reduce concurrent libcurl resolver-thread
+// creation on backends that route opens through HTTPS (notably the GCS
+// backend on macOS), where `pthread_create` can return EAGAIN under burst
+// load and surface to callers as `CURLE_FAILED_INIT`.
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
 BulkOpenPRead(absl::string_view file_spec_with_prefix,
-              absl::string_view options = {});
+              absl::string_view options = {}, int max_parallelism = 0);
 
 }  // namespace bagz::file
 
