@@ -46,7 +46,7 @@ cmake.args = ["-Wno-dev"]
 # We need openssl3, which is only available in newer versions of the build
 # image.
 manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:2024.12.16-1"
-build = "cp3*-manylinux_x86_64"
+build = "cp3*-manylinux_x86_64 cp3*-macosx_*"
 build-frontend = "build[uv]"
 build-verbosity = 1
 test-command = "pytest {package}/src"
@@ -66,4 +66,14 @@ yum install -y libcurl-devel openssl3-devel \
     && ln -s libcrypto.so.3 /usr/lib64/libcrypto.so
 '''
 
+# auditwheel is Linux-only; macOS uses the default delocate repair instead.
 repair-wheel-command = "auditwheel repair --strip -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+# Build against Homebrew's openssl3 (CURL is provided by the system SDK). The
+# source builds its other dependencies (abseil, google-cloud-cpp, zstd, ...)
+# from source via CMake FetchContent, so no other system packages are needed.
+before-all = "brew install openssl@3"
+
+[tool.cibuildwheel.macos.environment]
+OPENSSL_ROOT_DIR = "$(brew --prefix openssl@3)"
