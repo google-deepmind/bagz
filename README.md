@@ -9,19 +9,42 @@ index-based lookup. All indexing is zero based.
 ## Installation
 
 To install Bagz from source we recommend using [uv](https://docs.astral.sh/uv/).
-The install will download required dependencies apart from curl
-(`libcurl-devel`) and OpenSSL (`openssl-devel`). These need to be installed in a
-location that cmake's `find_package` searches.
+The build downloads its other dependencies automatically, but curl and OpenSSL
+must already be installed in a location that cmake's `find_package` searches.
+
+### Linux
+
+Install curl (`libcurl-devel`) and OpenSSL (`openssl-devel`) with your system
+package manager, then:
 
 ```sh
 uv pip install .
 ```
 
-On Linux you can install the latest version from PyPI.
+On Linux you can also install the latest version from PyPI:
 
 ```sh
 uv pip install bagz
 ```
+
+### macOS
+
+curl ships with the macOS SDK; install OpenSSL with [Homebrew](https://brew.sh):
+
+```sh
+brew install openssl@3
+```
+
+Homebrew keeps `openssl@3` keg-only, so point cmake at it explicitly to be sure
+`find_package` can locate it:
+
+```sh
+OPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" uv pip install .
+```
+
+(If `openssl@3` happens to be linked into your Homebrew prefix, a plain
+`uv pip install .` works too, but setting `OPENSSL_ROOT_DIR` is harmless and
+more portable.) There are no macOS wheels on PyPI yet, so install from source.
 
 ## Python API
 
