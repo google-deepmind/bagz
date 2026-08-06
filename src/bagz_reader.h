@@ -89,7 +89,7 @@ class BagzReader {
   static absl::StatusOr<BagzReader> OpenFiles(
       absl::Span<absl_nonnull std::unique_ptr<PReadFile>> record_files,
       absl::Span<absl_nonnull std::unique_ptr<PReadFile>> limits_files,
-      Options options);
+      Options options, std::string filespec = "");
 
   // Opens a collection of Bagz-formatted files (shards).
   //
@@ -110,6 +110,18 @@ class BagzReader {
   // Returns view of the records in the bag.
   absl::StatusOr<BagzReader> Slice(size_t start, int64_t step,
                                    size_t length) const;
+
+  // Returns the filespec string used to open this reader.
+  const std::string& filespec() const;
+
+  // Returns the slice starting record index.
+  size_t slice_start() const { return slice_start_; }
+
+  // Returns the slice step.
+  int64_t slice_step() const { return slice_step_; }
+
+  // Returns the slice length.
+  size_t slice_length() const { return slice_length_; }
 
   // Returns the opening options.
   const Options& options() const;
