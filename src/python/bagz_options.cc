@@ -65,13 +65,18 @@ void RegisterBagzOptions(py::module& m) {
   py::class_<CompressionNone>(m, "CompressionNone",
                               "Override the default compression to be none.")
       .def(py::init([]() { return CompressionNone{}; }),
-           py::return_value_policy::move);
+           py::return_value_policy::move)
+      .def(py::pickle([](const CompressionNone&) { return py::make_tuple(); },
+                      [](py::tuple) { return CompressionNone{}; }));
 
   py::class_<CompressionAutoDetect>(
       m, "CompressionAutoDetect",
       "Use the default compression for the filename extension.")
       .def(py::init([]() { return CompressionAutoDetect{}; }),
-           py::return_value_policy::move);
+           py::return_value_policy::move)
+      .def(py::pickle(
+          [](const CompressionAutoDetect&) { return py::make_tuple(); },
+          [](py::tuple) { return CompressionAutoDetect{}; }));
 
   py::class_<CompressionZstd>(m, "CompressionZstd", "Use Zstd compression.")
       .def(py::init([](int level, absl::string_view dictionary) {
@@ -81,7 +86,18 @@ void RegisterBagzOptions(py::module& m) {
            py::arg("level") = 0, py::arg("dictionary") = "",
            py::return_value_policy::move, py::doc(kCompressionZtdInitDoc + 1))
       .def_readwrite("level", &CompressionZstd::level)
-      .def_readwrite("dictionary", &CompressionZstd::dictionary);
+      .def_readwrite("dictionary", &CompressionZstd::dictionary)
+      .def(py::pickle(
+          [](const CompressionZstd& c) {
+            return py::make_tuple(c.level, c.dictionary);
+          },
+          [](py::tuple t) {
+            if (t.size() != 2) {
+              throw py::type_error("Invalid state for CompressionZstd!");
+            }
+            return CompressionZstd{.dictionary = t[1].cast<std::string>(),
+                                   .level = t[0].cast<int>()};
+          }));
 
   py::enum_<ShardingLayout>(m, "ShardingLayout", kShardingLayoutEnumDoc + 1)
       .value("CONCATENATED", ShardingLayout::kConcatenated,

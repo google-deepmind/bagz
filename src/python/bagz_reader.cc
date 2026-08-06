@@ -522,11 +522,66 @@ void RegisterBagzReader(py::module& m) {
       .def_readwrite("limits_placement", &BagzReader::Options::limits_placement)
       .def_readwrite("compression", &BagzReader::Options::compression)
       .def_readwrite("limits_storage", &BagzReader::Options::limits_storage)
-      .def_readwrite("max_parallelism", &BagzReader::Options::max_parallelism);
+      .def_readwrite("max_parallelism", &BagzReader::Options::max_parallelism)
+      .def(py::pickle(
+          [](const BagzReader::Options& options) {
+            return py::make_tuple(
+                options.sharding_layout, options.limits_placement,
+                options.compression, options.limits_storage,
+                options.max_parallelism, options.read_ahead_bytes);
+          },
+          [](py::tuple t) {
+            if (t.size() != 6) {
+              throw py::type_error("Invalid state for BagzReader.Options!");
+            }
+            return BagzReader::Options{
+                .sharding_layout = t[0].cast<ShardingLayout>(),
+                .limits_placement = t[1].cast<LimitsPlacement>(),
+                .compression = t[2].cast<Compression>(),
+                .limits_storage = t[3].cast<LimitsStorage>(),
+                .max_parallelism = t[4].cast<int>(),
+                .read_ahead_bytes = t[5].cast<std::optional<size_t>>(),
+            };
+          }));
 
   reader
       .def(py::init(&Init), py::arg("file_spec"),
            py::arg("options") = BagzReader::Options{}, py::doc(kInitDoc + 1))
+      .def_property_readonly("options", &BagzReader::options)
+      .def_property_readonly("file_spec", &BagzReader::filespec)
+      .def(py::pickle(
+          [](const BagzReader& reader) {
+            if (reader.filespec().empty()) {
+              throw py::type_error(
+                  "Cannot pickle BagzReader opened without a file_spec path.");
+            }
+            return py::make_tuple(reader.filespec(), reader.options(),
+                                  reader.slice_start(), reader.slice_step(),
+                                  reader.slice_length());
+          },
+          [](py::tuple t) {
+            if (t.size() != 5) {
+              throw py::type_error("Invalid state for BagzReader!");
+            }
+            std::string filespec = t[0].cast<std::string>();
+            BagzReader::Options options = t[1].cast<BagzReader::Options>();
+            size_t slice_start = t[2].cast<size_t>();
+            int64_t slice_step = t[3].cast<int64_t>();
+            size_t slice_length = t[4].cast<size_t>();
+
+            absl::StatusOr<BagzReader> reader =
+                BagzReader::Open(filespec, std::move(options));
+            ThrowNonOkStatusAsException(reader.status());
+
+            if (slice_start == 0 && slice_step == 1 &&
+                slice_length == reader->size()) {
+              return *std::move(reader);
+            }
+            absl::StatusOr<BagzReader> slice =
+                reader->Slice(slice_start, slice_step, slice_length);
+            ThrowNonOkStatusAsException(slice.status());
+            return *std::move(slice);
+          }))
       .def("__len__", &BagzReader::size)
       .def("__getitem__", &GetItem, py::arg("index"), py::doc(kGetItemDoc + 1))
       .def("__getitem__", &GetSlice, py::arg("slice"), py::doc(kGetItemDoc + 1))

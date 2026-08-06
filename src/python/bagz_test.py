@@ -19,7 +19,9 @@ from typing import TypeAlias
 
 from absl.testing import absltest
 from absl.testing import parameterized
+import multiprocessing as mp
 import numpy as np
+import pickle
 
 import bagz
 
@@ -427,6 +429,76 @@ class BagTest(parameterized.TestCase):
       for _ in range(4):
         next(item_iter)
       del item_iter
+
+  def test_reader_pickle(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    reader = bagz.Reader(file)
+    unpickled_reader = pickle.loads(pickle.dumps(reader))
+
+    self.assertEqual(len(unpickled_reader), len(reader))
+    self.assertEqual(list(unpickled_reader), records)
+    self.assertEqual(unpickled_reader[5], records[5])
+
+  def test_sliced_reader_pickle(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    reader = bagz.Reader(file)
+    sliced_reader = reader[3:15:2]
+
+    unpickled_slice = pickle.loads(pickle.dumps(sliced_reader))
+    self.assertEqual(list(unpickled_slice), list(sliced_reader))
+    self.assertEqual(unpickled_slice[0], sliced_reader[0])
+
+  def test_reader_options_pickle(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    options = bagz.Reader.Options(
+        max_parallelism=8,
+        limits_storage=bagz.LimitsStorage.IN_MEMORY,
+        compression=bagz.CompressionZstd(level=3),
+    )
+    reader = bagz.Reader(file, options=options)
+
+    unpickled_reader = pickle.loads(pickle.dumps(reader))
+    self.assertEqual(unpickled_reader.options.max_parallelism, 8)
+    self.assertEqual(
+        unpickled_reader.options.limits_storage, bagz.LimitsStorage.IN_MEMORY
+    )
+    self.assertEqual(unpickled_reader[0], records[0])
+
+  def test_multiprocessing_pool(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    reader = bagz.Reader(file)
+
+    ctx = mp.get_context('fork') if 'fork' in mp.get_all_start_methods() else mp.get_context()
+    with ctx.Pool(processes=2) as pool:
+      results = pool.starmap(
+          _read_worker_helper, [(reader, i) for i in range(len(reader))]
+      )
+
+    self.assertEqual(results, records)
+
+
+def _read_worker_helper(reader: bagz.Reader, idx: int) -> bytes:
+  return reader[idx]
 
 
 if __name__ == '__main__':
