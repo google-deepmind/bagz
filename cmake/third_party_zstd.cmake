@@ -15,12 +15,12 @@
 # Only build static version of zstd.
 set(ZSTD_BUILD_STATIC ON)
 set(ZSTD_BUILD_SHARED OFF)
+set(ZSTD_LEGACY_SUPPORT OFF)
 
 FetchContent_Declare(
   zstd
-  GIT_REPOSITORY https://github.com/facebook/zstd.git
-  GIT_TAG f8745da6ff1ad1e7bab384bd1f9d742439278e99 # v1.5.7
-  GIT_SHALLOW TRUE
+  URL https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+  URL_HASH SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
   OVERRIDE_FIND_PACKAGE
   EXCLUDE_FROM_ALL
   SOURCE_SUBDIR build/cmake

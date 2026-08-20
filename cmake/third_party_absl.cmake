@@ -17,8 +17,8 @@ set(ABSL_PROPAGATE_CXX_STD ON)
 
 FetchContent_Declare(
   absl
-  GIT_REPOSITORY https://github.com/abseil/abseil-cpp
-  GIT_TAG 76bb24329e8bf5f39704eb10d21b9a80befa7c81 # lts_2025_05_12
+  URL https://github.com/abseil/abseil-cpp/releases/download/20250814.1/abseil-cpp-20250814.1.tar.gz
+  URL_HASH SHA256=1692f77d1739bacf3f94337188b78583cf09bab7e420d2dc6c5605a4f86785a1
   OVERRIDE_FIND_PACKAGE
   EXCLUDE_FROM_ALL
 )

@@ -115,7 +115,7 @@ class BagzIterator {
                 status = absl::AbortedError("");
               } else if (!indices.empty()) {
                 {
-                  absl::MutexLock lock(&buffer_mutex_);
+                  absl::MutexLock lock(buffer_mutex_);
                   buffer.resize(indices.size(), std::nullopt);
                 }
                 status = reader_.ReadIndicesWithAllocator(
@@ -130,7 +130,7 @@ class BagzIterator {
               if (end_position > offset) {
                 size_t batch_size = end_position - offset;
                 {
-                  absl::MutexLock lock(&buffer_mutex_);
+                  absl::MutexLock lock(buffer_mutex_);
                   buffer.resize(batch_size, std::nullopt);
                 }
                 status = reader_.ReadRangeWithAllocator(
@@ -141,7 +141,7 @@ class BagzIterator {
             }
             bool last_batch = buffer.size() < num_ahead;
             {
-              absl::MutexLock lock(&buffer_mutex_);
+              absl::MutexLock lock(buffer_mutex_);
               while (!buffer_.empty()) {
                 buffer_available_.Wait(&buffer_mutex_);
               }
@@ -183,7 +183,7 @@ class BagzIterator {
     std::optional<absl::StatusOr<Result>> result = std::nullopt;
     bool buffer_empty = false;
     {
-      absl::MutexLock lock(&buffer_mutex_);
+      absl::MutexLock lock(buffer_mutex_);
       while (buffer_.empty() && status_.ok() && more_to_read_) {
         next_available_.Wait(&buffer_mutex_);
       }
@@ -206,7 +206,7 @@ class BagzIterator {
 
  private:
   void ClearBuffer() {
-    absl::MutexLock lock(&buffer_mutex_);
+    absl::MutexLock lock(buffer_mutex_);
     auto guard = buffer_edit_guard_();
     buffer_.clear();
   }
@@ -254,7 +254,8 @@ struct SpanFromString {
 };
 
 struct NoOpEditGuard {
-  int operator()() const { return 0; }
+  struct GuardType { ~GuardType() noexcept {} };
+  GuardType operator()() const { return {}; }
 };
 
 }  // namespace internal

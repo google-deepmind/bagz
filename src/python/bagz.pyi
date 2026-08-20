@@ -165,6 +165,8 @@ class Reader(Sequence[bytes]):
         max_parallelism: int = ...,
     ) -> None:
       """Options for creating the bagz.Reader."""
+    def __getstate__(self) -> tuple[object, ...]: ...
+    def __setstate__(self, state: tuple[object, ...]) -> None: ...
 
   def __init__(
       self, file_spec: os.PathLike[str] | str, options: Reader.Options = ...
@@ -179,6 +181,17 @@ class Reader(Sequence[bytes]):
           "fs:/path/to/f@3.bagz,fs:/path/to/bar.bagz").
       options: options to use when reading, see `bagz.Reader.Options`.
     """
+
+  @property
+  def options(self) -> Reader.Options:
+    """Returns the options used to open the reader."""
+
+  @property
+  def file_spec(self) -> str:
+    """Returns the file_spec used to open the reader."""
+
+  def __getstate__(self) -> tuple[object, ...]: ...
+  def __setstate__(self, state: tuple[object, ...]) -> None: ...
 
   def count(self, value: bytes) -> int:
     """Returns the number of occurrences of the given value in the reader."""

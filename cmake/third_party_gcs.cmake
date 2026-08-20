@@ -24,49 +24,49 @@ set(BUILD_TESTING OFF)
 
 FetchContent_Declare(
   c-ares
-  GIT_REPOSITORY https://github.com/c-ares/c-ares.git
-  GIT_TAG d3a507e920e7af18a5efb7f9f1d8044ed4750013 # v1.34.5
-  GIT_SHALLOW TRUE
+  URL https://github.com/c-ares/c-ares/releases/download/v1.34.5/c-ares-1.34.5.tar.gz
+  URL_HASH SHA256=7d935790e9af081c25c495fd13c2cfcda4792983418e96358ef6e7320ee06346
   OVERRIDE_FIND_PACKAGE
   EXCLUDE_FROM_ALL
 )
 
 FetchContent_Declare(
   nlohmann_json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG 55f93686c01528224f448c19128836e7df245f72 # v3.12.0
-  GIT_SHALLOW TRUE
+  URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+  URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
   OVERRIDE_FIND_PACKAGE
   EXCLUDE_FROM_ALL
 )
 
 FetchContent_Declare(
   crc32c
-  GIT_REPOSITORY https://github.com/google/crc32c.git
   # Version after 1.1.2 to support cmake 4.
-  GIT_TAG 2bbb3be42e20a0e6c0f7b39dc07dc863d9ffbc07 # 1.1.2+cmake change.
-  GIT_SHALLOW TRUE
-  GIT_SUBMODULES_RECURSE
+  URL https://github.com/google/crc32c/archive/2bbb3be42e20a0e6c0f7b39dc07dc863d9ffbc07.tar.gz
+  URL_HASH SHA256=56be8308f23626f82075a035daabd473c8e2b86344768c46182afe86edebf49d
   OVERRIDE_FIND_PACKAGE
   EXCLUDE_FROM_ALL
 )
 
 FetchContent_Declare(
   re2
-  GIT_REPOSITORY https://github.com/google/re2.git
-  GIT_TAG 6dcd83d60f7944926bfd308cc13979fc53dd69ca # 2024-05-01
-  GIT_SHALLOW TRUE
+  URL https://github.com/google/re2/releases/download/2024-05-01/re2-2024-05-01.tar.gz
+  URL_HASH SHA256=fef2f366578401eada34f5603679fb2aebe9b409de8d275a482ce5f2cbac2492
   OVERRIDE_FIND_PACKAGE
   EXCLUDE_FROM_ALL
 )
 
 FetchContent_Declare(
   google_cloud_cpp
-  GIT_REPOSITORY https://github.com/googleapis/google-cloud-cpp.git
-  GIT_TAG c7e213b6d5053f5704fb09b1d4fdcbd71df26a20 # 2.37.0
-  GIT_SHALLOW TRUE
+  URL https://github.com/googleapis/google-cloud-cpp/archive/refs/tags/v2.37.0.tar.gz
+  URL_HASH SHA256=10867580483cb338e7d50920c2383698f3572cc6b4c7d072e38d5f43755cbd80
   EXCLUDE_FROM_ALL
 )
+
+# Disable usage of third party libraries for CRC32
+set(CRC32C_USE_GLOG OFF)
+set(CRC32C_BUILD_TESTS OFF)
+set(CRC32C_BUILD_BENCHMARKS OFF)
+set(CRC32C_INSTALL OFF)
 
 # Use the absl library provided by this cmake file and disable tests, install
 # and shared library.

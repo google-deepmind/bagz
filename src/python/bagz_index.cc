@@ -20,20 +20,21 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "src/bagz_reader.h"
-#include "pybind11/cast.h"
-#include "pybind11/gil.h"
-#include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
+#include "nanobind/nanobind.h"
+#include "nanobind/stl/optional.h"  // IWYU pragma: keep
+#include "nanobind/stl/string.h"  // IWYU pragma: keep
+#include "nanobind/stl/string_view.h"  // IWYU pragma: keep
 
 namespace bagz {
 namespace {
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 constexpr char kInitDoc[] = R"(
 Creates a reverse index of record to record-index.
@@ -74,35 +75,73 @@ Compare with len(bag) to detect duplicates.
 
 }  // namespace
 
-void RegisterBagzIndex(py::module& m) {
-  py::class_<BagzIndex>(
+void RegisterBagzIndex(nb::module_& m) {
+  nb::class_<BagzIndex>(
       m, "Index",
       "An in-memory class for finding row-index of record in Bag file.")
-      .def(py::init([](const BagzReader& reader) {
-             if (absl::StatusOr<BagzIndex> index = BagzIndex::Create(reader);
-                 index.ok()) {
-               return *std::move(index);
-             } else {
-               throw std::invalid_argument(index.status().ToString());
-             }
-           }),
-           py::arg("reader"), py::doc(kInitDoc + 1),
-           py::call_guard<py::gil_scoped_release>())
-      .def("get", &BagzIndex::operator[], py::arg("record"),
-           py::doc(kGetDoc + 1))
       .def(
-          "__getitem__",
-          [](const BagzIndex& index, absl::string_view item) {
-            if (std::optional<size_t> i = index[item]; i.has_value()) {
-              return *i;
+          "__init__",
+          [](BagzIndex* t, const BagzReader& reader) {
+            if (absl::StatusOr<BagzIndex> index = BagzIndex::Create(reader);
+                index.ok()) {
+              new (t) BagzIndex(*std::move(index));
             } else {
-              throw py::key_error(std::string(item));
+              throw std::invalid_argument(index.status().ToString());
             }
           },
-          py::doc(kGetItemDoc + 1))
-      .def("__contains__", &BagzIndex::Contains, py::arg("record"),
-           py::doc(kContainsDoc + 1))
-      .def("__len__", &BagzIndex::size, py::doc(kLenDoc + 1));
+          nb::arg("reader"), kInitDoc + 1,
+          nb::call_guard<nb::gil_scoped_release>())
+      .def(
+          "get",
+          [](const BagzIndex& index,
+             nb::object record_obj) -> std::optional<size_t> {
+            absl::string_view record;
+            if (nb::isinstance<nb::bytes>(record_obj)) {
+              nb::bytes b = nb::cast<nb::bytes>(record_obj);
+              record = absl::string_view((const char*)b.data(), b.size());
+            } else if (nb::isinstance<nb::str>(record_obj)) {
+              record = nb::cast<std::string_view>(record_obj);
+            } else {
+              throw nb::type_error("record must be str or bytes");
+            }
+            return index[record];
+          },
+          nb::arg("record"), kGetDoc + 1)
+      .def(
+          "__getitem__",
+          [](const BagzIndex& index, nb::object record_obj) {
+            absl::string_view record;
+            if (nb::isinstance<nb::bytes>(record_obj)) {
+              nb::bytes b = nb::cast<nb::bytes>(record_obj);
+              record = absl::string_view((const char*)b.data(), b.size());
+            } else if (nb::isinstance<nb::str>(record_obj)) {
+              record = nb::cast<std::string_view>(record_obj);
+            } else {
+              throw nb::type_error("record must be str or bytes");
+            }
+            if (std::optional<size_t> i = index[record]; i.has_value()) {
+              return *i;
+            } else {
+              throw nb::key_error(std::string(record).c_str());
+            }
+          },
+          kGetItemDoc + 1)
+      .def(
+          "__contains__",
+          [](const BagzIndex& index, nb::object record_obj) {
+            absl::string_view record;
+            if (nb::isinstance<nb::bytes>(record_obj)) {
+              nb::bytes b = nb::cast<nb::bytes>(record_obj);
+              record = absl::string_view((const char*)b.data(), b.size());
+            } else if (nb::isinstance<nb::str>(record_obj)) {
+              record = nb::cast<std::string_view>(record_obj);
+            } else {
+              throw nb::type_error("record must be str or bytes");
+            }
+            return index.Contains(record);
+          },
+          nb::arg("record"), kContainsDoc + 1)
+      .def("__len__", &BagzIndex::size, kLenDoc + 1);
 }
 
 }  // namespace bagz

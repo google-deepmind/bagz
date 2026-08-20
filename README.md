@@ -23,6 +23,22 @@ On Linux you can install the latest version from PyPI.
 uv pip install bagz
 ```
 
+To build wheels it is recommended to use podman.
+
+```sh
+sudo apt install podman
+```
+
+```sh
+rm -rf dist/
+
+python3 -m build --sdist --outdir dist .
+python3 -m build --sdist --outdir dist plugins/gcs
+
+CIBW_CONTAINER_ENGINE="podman" cibuildwheel --platform linux dist/bagz-*.tar.gz
+CIBW_CONTAINER_ENGINE="podman" cibuildwheel --platform linux dist/bagz_gcs-*.tar.gz
+```
+
 ## Python API
 
 ### Python Reader

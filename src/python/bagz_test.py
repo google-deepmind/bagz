@@ -13,9 +13,11 @@
 # limitations under the License.
 
 from collections.abc import Iterable, Iterator, Sequence
+import multiprocessing as mp
 import os
 import pathlib
-from typing import TypeAlias
+import pickle  # pylint: disable=pickle-use
+from typing import TypeAlias, TypedDict
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -29,6 +31,48 @@ _NUM_RECORDS = 20
 Compression: TypeAlias = (
     bagz.CompressionAutoDetect | bagz.CompressionNone | bagz.CompressionZstd
 )
+
+
+class _WriterOptions(TypedDict, total=False):
+  limits_placement: bagz.LimitsPlacement
+  compression: Compression
+
+
+class _ReaderOptions(TypedDict, total=False):
+  sharding_layout: bagz.ShardingLayout
+  limits_placement: bagz.LimitsPlacement
+  compression: Compression
+  limits_storage: bagz.LimitsStorage
+  max_parallelism: int
+
+
+def _writer_options(
+    limits_placement: bagz.LimitsPlacement | None = None,
+    compression: Compression | None = None,
+) -> _WriterOptions:
+  """Creates a _WriterOptions TypedDict excluding None values."""
+  options: _WriterOptions = {}
+  if limits_placement is not None:
+    options['limits_placement'] = limits_placement
+  if compression is not None:
+    options['compression'] = compression
+  return options
+
+
+def _reader_options(
+    limits_placement: bagz.LimitsPlacement | None = None,
+    compression: Compression | None = None,
+    limits_storage: bagz.LimitsStorage | None = None,
+) -> _ReaderOptions:
+  """Creates a _ReaderOptions TypedDict excluding None values."""
+  options: _ReaderOptions = {}
+  if limits_placement is not None:
+    options['limits_placement'] = limits_placement
+  if compression is not None:
+    options['compression'] = compression
+  if limits_storage is not None:
+    options['limits_storage'] = limits_storage
+  return options
 
 
 def _generate_record(row: int) -> bytes:
@@ -96,17 +140,19 @@ class BagTest(parameterized.TestCase):
   ) -> None:
     file = pathlib.Path(self.create_tempdir()) / name
     records = list(_generate_records(_NUM_RECORDS))
-    writer_options = dict(
+    writer_options = _writer_options(
         limits_placement=limits_placement,
         compression=compression,
     )
-    writer_options = {k: v for k, v in writer_options.items() if v is not None}
     with bagz.Writer(file, bagz.Writer.Options(**writer_options)) as writer:
       for d in records:
         writer.write(d)
 
-    reader_options = dict(**writer_options, limits_storage=limits_storage)
-    reader_options = {k: v for k, v in reader_options.items() if v is not None}
+    reader_options = _reader_options(
+        limits_placement=limits_placement,
+        compression=compression,
+        limits_storage=limits_storage,
+    )
     reader = bagz.Reader(file, bagz.Reader.Options(**reader_options))
 
     all_indices = np.arange(len(records), dtype=np.int64)
@@ -235,8 +281,10 @@ class BagTest(parameterized.TestCase):
   ) -> None:
     file = pathlib.Path(self.create_tempdir()) / name
     records = list(_generate_records(_NUM_RECORDS))
-    options = dict(limits_placement=limits_placement, compression=compression)
-    options = {k: v for k, v in options.items() if v is not None}
+    options = _writer_options(
+        limits_placement=limits_placement,
+        compression=compression,
+    )
     writer = bagz.Writer(file, bagz.Writer.Options(**options))
     for d in records:
       writer.write(d)
@@ -317,10 +365,10 @@ class BagTest(parameterized.TestCase):
           msg=f'slice: {s}',
       )
 
-    with self.assertRaisesRegex(IndexError, 'Invalid slice'):
+    with self.assertRaises(TypeError):
       _ = reader.read_indices(slice('Not a number'))
 
-    with self.assertRaisesRegex(IndexError, 'Invalid slice'):
+    with self.assertRaises(TypeError):
       _ = reader[slice('Not a number')]
 
   def test_iterator(self) -> None:
@@ -427,6 +475,83 @@ class BagTest(parameterized.TestCase):
       for _ in range(4):
         next(item_iter)
       del item_iter
+
+  def test_reader_pickle(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    reader = bagz.Reader(file)
+    # pylint: disable-next=g-unsafe-pickle-load
+    unpickled_reader = pickle.loads(pickle.dumps(reader))
+
+    self.assertEqual(len(unpickled_reader), len(reader))
+    self.assertEqual(list(unpickled_reader), records)
+    self.assertEqual(unpickled_reader[5], records[5])
+
+  def test_sliced_reader_pickle(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    reader = bagz.Reader(file)
+    sliced_reader = reader[3:15:2]
+
+    # pylint: disable-next=g-unsafe-pickle-load
+    unpickled_slice = pickle.loads(pickle.dumps(sliced_reader))
+    self.assertEqual(list(unpickled_slice), list(sliced_reader))
+    self.assertEqual(unpickled_slice[0], sliced_reader[0])
+
+  def test_reader_options_pickle(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    options = bagz.Reader.Options(
+        max_parallelism=8,
+        limits_storage=bagz.LimitsStorage.IN_MEMORY,
+        compression=bagz.CompressionZstd(level=3),
+    )
+    reader = bagz.Reader(file, options=options)
+
+    # pylint: disable-next=g-unsafe-pickle-load
+    unpickled_reader = pickle.loads(pickle.dumps(reader))
+    self.assertEqual(unpickled_reader.options.max_parallelism, 8)
+    self.assertEqual(
+        unpickled_reader.options.limits_storage, bagz.LimitsStorage.IN_MEMORY
+    )
+    self.assertEqual(unpickled_reader[0], records[0])
+
+  def test_multiprocessing_pool(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    records = list(_generate_records(_NUM_RECORDS))
+    with bagz.Writer(file) as writer:
+      for rec in records:
+        writer.write(rec)
+
+    reader = bagz.Reader(file)
+
+    ctx = (
+        mp.get_context('fork')
+        if 'fork' in mp.get_all_start_methods()
+        else mp.get_context()
+    )
+    with ctx.Pool(processes=2) as pool:
+      results = pool.starmap(
+          _read_worker_helper, [(reader, i) for i in range(len(reader))]
+      )
+
+    self.assertEqual(results, records)
+
+
+def _read_worker_helper(reader: bagz.Reader, idx: int) -> bytes:
+  return reader[idx]
 
 
 if __name__ == '__main__':

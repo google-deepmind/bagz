@@ -77,7 +77,7 @@ class RecyclingPool {
   template <typename Factory>
   std::unique_ptr<T, Recycler> Get(Factory&& factory)
       ABSL_LOCKS_EXCLUDED(mutex_) {
-    if (absl::MutexLock lock(&mutex_); !recycle_pool_.empty()) {
+    if (absl::MutexLock lock(mutex_); !recycle_pool_.empty()) {
       T* object = recycle_pool_.back().release();
       recycle_pool_.pop_back();
       return std::unique_ptr<T, Recycler>(object, Recycler(this));
@@ -90,7 +90,7 @@ class RecyclingPool {
 
  private:
   void ReturnToPool(T* object) ABSL_LOCKS_EXCLUDED(mutex_) {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     recycle_pool_.emplace_back(object);
   }
 

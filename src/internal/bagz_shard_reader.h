@@ -90,7 +90,7 @@ class BagzShardReader {
   //
   // Recall that `*this` must not be in the empty state.
   absl::Status ReadFromByteRange(
-      const ByteRange& handle,
+      const ByteRange& byte_range,
       absl::FunctionRef<void(absl::string_view record)> callback) const;
 
   // Invokes `callback` consecutively with a view of each record in the range

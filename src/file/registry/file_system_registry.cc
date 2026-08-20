@@ -63,7 +63,7 @@ absl::StatusOr<ResolvedFile> FileSystemRegistry::Resolve(
   const auto& [prefix, filename] = SplitPrefixAndFilename(filename_with_prefix);
   FileSystem* file_system = nullptr;
   {
-    absl::MutexLock lock(&mutex_);
+    absl::MutexLock lock(mutex_);
     if (auto it = file_systems_.find(prefix); it != file_systems_.end()) {
       file_system = it->second;
     }
@@ -77,7 +77,7 @@ absl::StatusOr<ResolvedFile> FileSystemRegistry::Resolve(
 
 absl::Status FileSystemRegistry::Register(absl::string_view prefix,
                                           FileSystem& file_system) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (!prefix.empty() && (prefix.find(':') != prefix.size() - 1 ||
                           absl::StrContains(prefix, '/'))) {
     return absl::InvalidArgumentError(absl::StrCat(
@@ -94,7 +94,7 @@ absl::Status FileSystemRegistry::Register(absl::string_view prefix,
 
 // Unregisters a file system for a given prefix.
 absl::Status FileSystemRegistry::Unregister(absl::string_view prefix) {
-  absl::MutexLock lock(&mutex_);
+  absl::MutexLock lock(mutex_);
   if (file_systems_.erase(prefix) > 0) {
     return absl::OkStatus();
   } else {

@@ -15,12 +15,11 @@
 #ifndef BAGZ_SRC_PYTHON_BAGZ_READER_H_
 #define BAGZ_SRC_PYTHON_BAGZ_READER_H_
 
-
-#include "pybind11/pybind11.h"
+#include "nanobind/nanobind.h"
 
 namespace bagz {
 
-void RegisterBagzReader(pybind11::module& m);
+void RegisterBagzReader(nanobind::module_& m);
 
 }  // namespace bagz
 

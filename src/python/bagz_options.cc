@@ -15,21 +15,17 @@
 #include "src/python/bagz_options.h"
 
 #include <string>
+#include <utility>
 
-#include "absl/strings/string_view.h"
 #include "src/bagz_options.h"
-#include "pybind11/cast.h"
-#include "pybind11/gil.h"
-#include "pybind11/numpy.h"
-#include "pybind11/pybind11.h"
-#include "pybind11/pytypes.h"
-#include "pybind11/stl.h"
+#include "nanobind/nanobind.h"
+#include "nanobind/stl/string.h"  // IWYU pragma: keep
 
 namespace bagz {
 
 namespace {
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 constexpr char kCompressionZtdInitDoc[] = R"(
 Creates a CompressionZstd.
@@ -45,8 +41,8 @@ the records in each shard are indexed. See README.md#sharding.)";
 
 }  // namespace
 
-void RegisterBagzOptions(py::module& m) {
-  py::enum_<LimitsPlacement>(
+void RegisterBagzOptions(nb::module_& m) {
+  nb::enum_<LimitsPlacement>(
       m, "LimitsPlacement",
       "Whether limits are at the end of the file or in a separate file.")
       .value("TAIL", LimitsPlacement::kTail,
@@ -54,7 +50,7 @@ void RegisterBagzOptions(py::module& m) {
       .value("SEPARATE", LimitsPlacement::kSeparate,
              "Place limits in a separate file");
 
-  py::enum_<LimitsStorage>(m, "LimitsStorage",
+  nb::enum_<LimitsStorage>(m, "LimitsStorage",
                            "Whether to read the limits from disk for every "
                            "read or to cache the limits in memory.")
       .value("ON_DISK", LimitsStorage::kOnDisk,
@@ -62,28 +58,48 @@ void RegisterBagzOptions(py::module& m) {
       .value("IN_MEMORY", LimitsStorage::kInMemory,
              "Limits are copied from disk to RAM once and read from there");
 
-  py::class_<CompressionNone>(m, "CompressionNone",
+  nb::class_<CompressionNone>(m, "CompressionNone",
                               "Override the default compression to be none.")
-      .def(py::init([]() { return CompressionNone{}; }),
-           py::return_value_policy::move);
+      .def("__init__", [](CompressionNone* t) { new (t) CompressionNone{}; })
+      .def("__getstate__",
+           [](const CompressionNone&) { return nb::make_tuple(); })
+      .def("__setstate__",
+           [](CompressionNone* t, nb::tuple) { new (t) CompressionNone{}; });
 
-  py::class_<CompressionAutoDetect>(
+  nb::class_<CompressionAutoDetect>(
       m, "CompressionAutoDetect",
       "Use the default compression for the filename extension.")
-      .def(py::init([]() { return CompressionAutoDetect{}; }),
-           py::return_value_policy::move);
+      .def("__init__",
+           [](CompressionAutoDetect* t) { new (t) CompressionAutoDetect{}; })
+      .def("__getstate__",
+           [](const CompressionAutoDetect&) { return nb::make_tuple(); })
+      .def("__setstate__", [](CompressionAutoDetect* t, nb::tuple) {
+        new (t) CompressionAutoDetect{};
+      });
 
-  py::class_<CompressionZstd>(m, "CompressionZstd", "Use Zstd compression.")
-      .def(py::init([](int level, absl::string_view dictionary) {
-             return CompressionZstd{.dictionary = std::string(dictionary),
+  nb::class_<CompressionZstd>(m, "CompressionZstd", "Use Zstd compression.")
+      .def(
+          "__init__",
+          [](CompressionZstd* t, int level, std::string dictionary) {
+            new (t) CompressionZstd{.dictionary = std::move(dictionary),
                                     .level = level};
-           }),
-           py::arg("level") = 0, py::arg("dictionary") = "",
-           py::return_value_policy::move, py::doc(kCompressionZtdInitDoc + 1))
-      .def_readwrite("level", &CompressionZstd::level)
-      .def_readwrite("dictionary", &CompressionZstd::dictionary);
+          },
+          nb::arg("level") = 0, nb::arg("dictionary") = "",
+          kCompressionZtdInitDoc + 1)
+      .def_rw("level", &CompressionZstd::level)
+      .def_rw("dictionary", &CompressionZstd::dictionary)
+      .def("__getstate__",
+           [](const CompressionZstd& c) {
+             return nb::make_tuple(c.level, c.dictionary);
+           })
+      .def("__setstate__", [](CompressionZstd* t, nb::tuple state) {
+        new (t) CompressionZstd{
+            .dictionary = nb::cast<std::string>(state[1]),
+            .level = nb::cast<int>(state[0]),
+        };
+      });
 
-  py::enum_<ShardingLayout>(m, "ShardingLayout", kShardingLayoutEnumDoc + 1)
+  nb::enum_<ShardingLayout>(m, "ShardingLayout", kShardingLayoutEnumDoc + 1)
       .value("CONCATENATED", ShardingLayout::kConcatenated,
              "Concatenated sharding")
       .value("INTERLEAVED", ShardingLayout::kInterleaved,

@@ -16,6 +16,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "absl/base/no_destructor.h"
@@ -24,19 +25,16 @@
 #include "absl/strings/string_view.h"
 #include "src/bagz_options.h"
 #include "src/bagz_writer.h"
-#include "pybind11/attr.h"
-#include "pybind11/cast.h"
-#include "pybind11/gil.h"
-#include "pybind11/numpy.h"
-#include "pybind11/pybind11.h"
-#include "pybind11/pytypes.h"
-#include "pybind11/stl.h"
+#include "nanobind/nanobind.h"
+#include "nanobind/stl/string.h"  // IWYU pragma: keep
+#include "nanobind/stl/string_view.h"  // IWYU pragma: keep
+#include "nanobind/stl/variant.h"  // IWYU pragma: keep
 
 namespace bagz {
 
 namespace {
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 const char kWriterInitDoc[] = R"(
 Open a single Bagz file shard for writing.
@@ -109,64 +107,78 @@ Args:
 
 }  // namespace
 
-void RegisterBagzWriter(pybind11::module& m) {
+void RegisterBagzWriter(nb::module_& m) {
   auto writer =
-      py::class_<BagzWriter>(m, "Writer", "Writes a single Bagz shard.");
+      nb::class_<BagzWriter>(m, "Writer", "Writes a single Bagz shard.");
 
-  py::class_<BagzWriter::Options>(writer, "Options", kWriterOptionsDoc + 1)
-      .def(py::init(
-               [](LimitsPlacement limits_placement, Compression compression) {
-                 return BagzWriter::Options{
-                     .limits_placement = limits_placement,
-                     .compression = std::move(compression),
-                 };
-               }),
-           py::arg("limits_placement") = BagzWriter::Options{}.limits_placement,
-           py::arg("compression") = BagzWriter::Options{}.compression,
-           py::doc(kWriterOptionsInitDoc + 1))
-      .def_readwrite("limits_placement", &BagzWriter::Options::limits_placement)
-      .def_readwrite("compression", &BagzWriter::Options::compression);
+  nb::class_<BagzWriter::Options>(writer, "Options", kWriterOptionsDoc + 1)
+      .def(
+          "__init__",
+          [](BagzWriter::Options* t, LimitsPlacement limits_placement,
+             Compression compression) {
+            new (t) BagzWriter::Options{
+                .limits_placement = limits_placement,
+                .compression = std::move(compression),
+            };
+          },
+          nb::arg("limits_placement") = BagzWriter::Options{}.limits_placement,
+          nb::arg("compression") = BagzWriter::Options{}.compression,
+          kWriterOptionsInitDoc + 1)
+      .def_rw("limits_placement", &BagzWriter::Options::limits_placement)
+      .def_rw("compression", &BagzWriter::Options::compression);
 
   writer
-      .def(py::init(
-               [](py::object filename_obj, const BagzWriter::Options& options) {
-                 static absl::NoDestructor<py::object> fspath(
-                     py::module::import("os").attr("fspath"));
-                 std::string filename =
-                     py::cast<std::string>((*fspath)(filename_obj));
-                 {
-                   py::gil_scoped_release release_gil;
-                   absl::StatusOr<BagzWriter> writer =
-                       BagzWriter::OpenFile(filename, options);
-                   if (!writer.ok()) {
-                     throw std::invalid_argument(writer.status().ToString());
-                   }
-                   return *std::move(writer);
-                 }
-               }),
-           py::arg("filename"), py::arg("options") = BagzWriter::Options(),
-           py::doc(kWriterInitDoc + 1))
-      .def("__enter__", [](BagzWriter& self) -> BagzWriter& { return self; })
+      .def(
+          "__init__",
+          [](BagzWriter* t, nb::object filename_obj,
+             const BagzWriter::Options& options) {
+            static absl::NoDestructor<nb::object> fspath(
+                nb::module_::import_("os").attr("fspath"));
+            std::string filename =
+                nb::cast<std::string>((*fspath)(filename_obj));
+            {
+              nb::gil_scoped_release release_gil;
+              absl::StatusOr<BagzWriter> writer =
+                  BagzWriter::OpenFile(filename, options);
+              if (!writer.ok()) {
+                throw std::invalid_argument(writer.status().ToString());
+              }
+              new (t) BagzWriter(*std::move(writer));
+            }
+          },
+          nb::arg("filename"), nb::arg("options") = BagzWriter::Options(),
+          kWriterInitDoc + 1)
+      .def("__enter__", [](nb::handle self) { return self; })
       .def(
           "__exit__",
-          [](BagzWriter& self, py::handle exc_type, py::handle exc_value,
-             py::handle traceback) {
-            absl::Status status = self.Close();
+          [](nb::handle self, nb::handle exc_type, nb::handle exc_value,
+             nb::handle traceback) {
+            BagzWriter* writer = nb::inst_ptr<BagzWriter>(self);
+            absl::Status status = writer->Close();
             if (!status.ok()) {
               throw std::invalid_argument(status.ToString());
             }
           },
-          py::arg("exc_type"), py::arg("exc_value"), py::arg("traceback"),
-          py::call_guard<py::gil_scoped_release>())
+          nb::arg("exc_type").none(), nb::arg("exc_value").none(),
+          nb::arg("traceback").none(), nb::call_guard<nb::gil_scoped_release>())
       .def(
           "write",
-          [](BagzWriter* writer, absl::string_view record) {
+          [](BagzWriter* writer, nb::object record_obj) {
+            absl::string_view record;
+            if (nb::isinstance<nb::bytes>(record_obj)) {
+              nb::bytes b = nb::cast<nb::bytes>(record_obj);
+              record = absl::string_view((const char*)b.data(), b.size());
+            } else if (nb::isinstance<nb::str>(record_obj)) {
+              record = nb::cast<std::string_view>(record_obj);
+            } else {
+              throw nb::type_error("record must be str or bytes");
+            }
+            nb::gil_scoped_release release;
             if (absl::Status status = writer->Write(record); !status.ok()) {
               throw std::invalid_argument(status.ToString());
             }
           },
-          py::arg("record"), py::call_guard<py::gil_scoped_release>(),
-          py::doc(kWriterWriteDoc + 1))
+          nb::lock_self(), nb::arg("record"), kWriterWriteDoc + 1)
       .def(
           "close",
           [](BagzWriter* writer) {
@@ -174,8 +186,8 @@ void RegisterBagzWriter(pybind11::module& m) {
               throw std::invalid_argument(status.ToString());
             }
           },
-          py::call_guard<py::gil_scoped_release>(),
-          py::doc(kWriterCloseDoc + 1))
+          nb::lock_self(), nb::call_guard<nb::gil_scoped_release>(),
+          kWriterCloseDoc + 1)
       .def(
           "flush",
           [](BagzWriter* writer) {
@@ -183,8 +195,8 @@ void RegisterBagzWriter(pybind11::module& m) {
               throw std::invalid_argument(status.ToString());
             }
           },
-          py::call_guard<py::gil_scoped_release>(),
-          py::doc(kWriterFlushDoc + 1));
+          nb::lock_self(), nb::call_guard<nb::gil_scoped_release>(),
+          kWriterFlushDoc + 1);
 }
 
 }  // namespace bagz

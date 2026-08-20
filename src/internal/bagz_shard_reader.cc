@@ -64,6 +64,9 @@ absl::StatusOr<BagzShardReader::ByteRange> BagzShardReader::ReadByteRange(
         absl::StrCat("index(", index, ") >= size(", size(), ")"));
   }
   const size_t records_size = records_->size();
+  if (records_size == 0) {
+    return ByteRange(0, 0);
+  }
   uint64_t range[2] = {0, 0};
   if (index == 0) {
     if (absl::Status status =
@@ -140,6 +143,11 @@ absl::Status BagzShardReader::ReadLimits(size_t index, size_t count,
     limits[0] = 0;
     return absl::OkStatus();
   }
+  // All empty records.
+  if (records_->size() == 0) {
+    absl::c_fill(limits, 0);
+    return absl::OkStatus();
+  }
   if (index == 0) {
     limits[0] = 0;
     return ReadIntoUint64(*limits_, 0,
@@ -175,10 +183,20 @@ absl::Status BagzShardReader::ReadFromLimits(
         "size.)");
   }
 
+  const size_t num_bytes = limits.back() - limits.front();
+  if (num_bytes == 0) {
+    for (size_t i = 0; i + 1 < limits.size(); ++i) {
+      if (!callback(i, absl::string_view{})) {
+        return absl::OkStatus();
+      }
+    }
+    return absl::OkStatus();
+  }
+
   size_t result_index = 0;
   std::string partial;
   if (absl::Status status = records_->PRead(
-          limits.front(), limits.back() - limits.front(),
+          limits.front(), num_bytes,
           [&](absl::string_view chunk) {
             while (!chunk.empty()) {
               size_t record_size =
@@ -231,6 +249,14 @@ absl::Status BagzShardReader::ReadRange(
                                               num_records - count, ")"));
   }
   if (count == 0) {
+    return absl::OkStatus();
+  }
+  if (records_->size() == 0) {
+    for (size_t i = 0; i < count; ++i) {
+      if (!callback(i, absl::string_view{})) {
+        return absl::OkStatus();
+      }
+    }
     return absl::OkStatus();
   }
   auto split_points_memory = std::make_unique<uint64_t[]>(count + 1);

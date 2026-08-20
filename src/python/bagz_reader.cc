@@ -14,9 +14,6 @@
 
 #include "src/bagz_reader.h"
 
-#include <Python.h>
-
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -36,38 +33,29 @@
 #include "absl/types/span.h"
 #include "src/bagz_iterator.h"
 #include "src/bagz_options.h"
-#include "pybind11/attr.h"
-#include "pybind11/cast.h"
-#include "pybind11/gil.h"
-#include "pybind11/numpy.h"
-#include "pybind11/pybind11.h"
-#include "pybind11/pytypes.h"
-#include "pybind11/stl.h"
+#include "nanobind/nanobind.h"
+#include "nanobind/ndarray.h"
+#include "nanobind/stl/optional.h"  // IWYU pragma: keep
+#include "nanobind/stl/string.h"  // IWYU pragma: keep
+#include "nanobind/stl/string_view.h"  // IWYU pragma: keep
+#include "nanobind/stl/variant.h"  // IWYU pragma: keep
+#include "nanobind/stl/vector.h"  // IWYU pragma: keep
 
 namespace bagz {
 namespace {
 
-namespace py = pybind11;
-
-class FileNotFoundError : public py::builtin_exception {
- public:
-  using py::builtin_exception::builtin_exception;
-
-  void set_error() const override {
-    PyErr_SetString(PyExc_FileNotFoundError, what());
-  }
-};
+namespace nb = nanobind;
 
 // Helper class to allocate results for callback-based reads.
 class IndexedAllocator {
  public:
   // Construct with GIL held.
-  explicit IndexedAllocator(py::list& result) : result_(result) {}
+  explicit IndexedAllocator(nb::list& result) : result_(result) {}
 
   // Use callback without GIL held. GIL is released before returning.
-  absl::Span<char> operator()(size_t result_index, ssize_t num_bytes) const {
-    py::gil_scoped_acquire acquire;
-    py::bytes record(nullptr, num_bytes);
+  absl::Span<char> operator()(size_t result_index, Py_ssize_t num_bytes) const {
+    nb::gil_scoped_acquire acquire;
+    nb::bytes record(nullptr, num_bytes);
     char* bytes;
     PyBytes_AsStringAndSize(record.ptr(), &bytes, &num_bytes);
     result_[result_index] = std::move(record);
@@ -75,31 +63,33 @@ class IndexedAllocator {
   }
 
  private:
-  py::list& result_;
+  nb::list& result_;
 };
 
-// Helper to copy results from one list to another.
+// Helper class to copy results for callback-based reads.
 class IndexedCopy {
  public:
   // Construct with GIL held.
-  explicit IndexedCopy(py::list& result) : result_(result) {}
+  explicit IndexedCopy(nb::list& result) : result_(result) {}
 
-  // Use callback with GIL held. GIL is released before returning.
-  void operator()(size_t from_index, ssize_t to_index) const {
-    py::gil_scoped_acquire acquire;
+  // Use callback without GIL held. GIL is released before returning.
+  void operator()(size_t from_index, Py_ssize_t to_index) const {
+    nb::gil_scoped_acquire acquire;
     result_[to_index] = result_[from_index];
   }
 
  private:
-  py::list& result_;
+  nb::list& result_;
 };
 
 void ThrowNonOkStatusAsException(const absl::Status& status) {
   if (!status.ok()) {
+    nb::gil_scoped_acquire acquire;
     if (absl::IsOutOfRange(status)) {
-      throw py::index_error(std::string(status.message()));
+      throw nb::index_error(std::string(status.message()).c_str());
     } else if (absl::IsNotFound(status)) {
-      throw FileNotFoundError(status.ToString());
+      PyErr_SetString(PyExc_FileNotFoundError, status.ToString().c_str());
+      nb::raise_python_error();
     }
     throw std::invalid_argument(status.ToString());
   }
@@ -132,12 +122,12 @@ Args:
   options: options to use when reading, see `bagz.Reader.Options`.
 )";
 
-BagzReader Init(py::object file_spec_obj, const BagzReader::Options& options) {
-  static absl::NoDestructor<py::object> fspath(
-      py::module::import("os").attr("fspath"));
-  std::string file_spec = py::cast<std::string>((*fspath)(file_spec_obj));
+BagzReader Init(nb::object file_spec_obj, const BagzReader::Options& options) {
+  static absl::NoDestructor<nb::object> fspath(
+      nb::module_::import_("os").attr("fspath"));
+  std::string file_spec = nb::cast<std::string>((*fspath)(file_spec_obj));
   {
-    py::gil_scoped_release release_gil;
+    nb::gil_scoped_release release_gil;
     absl::StatusOr<BagzReader> reader = BagzReader::Open(file_spec, options);
     ThrowNonOkStatusAsException(reader.status());
     return *std::move(reader);
@@ -148,10 +138,13 @@ constexpr char kReadRangeDoc[] = R"(
 Returns all the records in the range [start, start + num_records).
 )";
 
-py::list ReadRange(const BagzReader& reader, size_t start, size_t num_records) {
-  py::list result(num_records);
+nb::list ReadRange(const BagzReader& reader, size_t start, size_t num_records) {
+  nb::list result;
+  for (size_t i = 0; i < num_records; ++i) {
+    result.append(nb::none());
+  }
   {
-    py::gil_scoped_release release;
+    nb::gil_scoped_release release;
     ThrowNonOkStatusAsException(reader.ReadRangeWithAllocator(
         start, num_records, IndexedAllocator(result)));
   }
@@ -162,11 +155,14 @@ constexpr char kReadIndicesDoc[] = R"(
 Returns the records at the given indices.
 )";
 
-py::list ReadIndicesFromSpan(const BagzReader& reader,
+nb::list ReadIndicesFromSpan(const BagzReader& reader,
                              absl::Span<const size_t> indices) {
-  py::list result(indices.size());
+  nb::list result;
+  for (size_t i = 0; i < indices.size(); ++i) {
+    result.append(nb::none());
+  }
   {
-    py::gil_scoped_release release;
+    nb::gil_scoped_release release;
     ThrowNonOkStatusAsException(reader.ReadIndicesWithAllocator(
         indices, IndexedAllocator(result), IndexedCopy(result)));
   }
@@ -174,8 +170,8 @@ py::list ReadIndicesFromSpan(const BagzReader& reader,
 }
 
 template <typename Int64>
-py::list ReadIndicesFromNumpy(const BagzReader& reader,
-                              py::array_t<Int64, py::array::c_style> indices) {
+nb::list ReadIndicesFromNumpy(const BagzReader& reader,
+                              nb::ndarray<Int64, nb::c_contig> indices) {
   static_assert(sizeof(Int64) == sizeof(size_t),
                 "Int64 must be the same size as size_t");
   if (indices.ndim() != 1) {
@@ -184,27 +180,27 @@ py::list ReadIndicesFromNumpy(const BagzReader& reader,
   return ReadIndicesFromSpan(
       reader,
       absl::MakeConstSpan(reinterpret_cast<const size_t*>(indices.data()),
-                          indices.shape()[0]));
+                          indices.shape(0)));
 }
 
-py::list ReadIndicesFromIterable(const BagzReader& reader,
+nb::list ReadIndicesFromIterable(const BagzReader& reader,
                                  std::vector<size_t> indices) {
   return ReadIndicesFromSpan(reader, indices);
 }
 
-py::list ReadIndicesFromSlice(const BagzReader& reader, py::slice slice) {
-  ssize_t start, stop, step, slicelength;
-  if (!slice.compute(static_cast<ssize_t>(reader.size()), &start, &stop, &step,
-                     &slicelength)) {
-    throw py::index_error("Invalid slice");
-  }
+nb::list ReadIndicesFromSlice(const BagzReader& reader, nb::slice slice) {
+  auto comp = slice.compute(reader.size());
+  Py_ssize_t start = comp.get<0>();
+  Py_ssize_t step = comp.get<2>();
+  size_t slicelength = comp.get<3>();
+
   if (step == 1) {
     return ReadRange(reader, start, slicelength);
   }
   std::vector<size_t> indices_vector;
   indices_vector.reserve(slicelength);
-  for (size_t i = start; i < stop; i += step) {
-    indices_vector.push_back(i);
+  for (size_t i = 0; i < slicelength; ++i) {
+    indices_vector.push_back(start + i * step);
   }
   return ReadIndicesFromSpan(reader, indices_vector);
 }
@@ -213,14 +209,14 @@ constexpr char kGetItemDoc[] = R"(
 Returns the record at the given index.
 )";
 
-py::bytes GetItem(const BagzReader& reader, size_t index) {
-  py::bytes result;
+nb::bytes GetItem(const BagzReader& reader, size_t index) {
+  nb::bytes result;
   {
-    py::gil_scoped_release release;
+    nb::gil_scoped_release release;
     ThrowNonOkStatusAsException(reader.ReadWithAllocator(
-        index, [&result](ssize_t num_bytes) -> absl::Span<char> {
-          py::gil_scoped_acquire acquire;
-          result = py::bytes(nullptr, num_bytes);
+        index, [&result](Py_ssize_t num_bytes) -> absl::Span<char> {
+          nb::gil_scoped_acquire acquire;
+          result = nb::bytes(nullptr, num_bytes);
           char* bytes;
           PyBytes_AsStringAndSize(result.ptr(), &bytes, &num_bytes);
           return absl::Span<char>(bytes, num_bytes);
@@ -229,12 +225,12 @@ py::bytes GetItem(const BagzReader& reader, size_t index) {
   return result;
 }
 
-BagzReader GetSlice(const BagzReader& reader, py::slice slice) {
-  ssize_t step, start, stop, slicelength;
-  if (!slice.compute(static_cast<ssize_t>(reader.size()), &start, &stop, &step,
-                     &slicelength)) {
-    throw py::index_error("Invalid slice");
-  }
+BagzReader GetSlice(const BagzReader& reader, nb::slice slice) {
+  auto comp = slice.compute(reader.size());
+  Py_ssize_t start = comp.get<0>();
+  Py_ssize_t step = comp.get<2>();
+  size_t slicelength = comp.get<3>();
+
   auto reader_slice = reader.Slice(start, step, slicelength);
   ThrowNonOkStatusAsException(reader_slice.status());
   return *std::move(reader_slice);
@@ -246,7 +242,7 @@ BagzReader GetSlice(const BagzReader& reader, py::slice slice) {
 // Returns whether any `callback` returned true.
 template <typename CallBack>
 bool AnyOf(BagzReader reader, CallBack&& callback) {
-  py::gil_scoped_release release;
+  nb::gil_scoped_release release;
   BagzIterator iterator(std::move(reader));
   absl::Time time_start = absl::Now();
   for (;;) {
@@ -260,9 +256,9 @@ bool AnyOf(BagzReader reader, CallBack&& callback) {
     }
     absl::Time time_now = absl::Now();
     if (time_now - time_start > absl::Seconds(1)) {
-      py::gil_scoped_acquire acquire;
+      nb::gil_scoped_acquire acquire;
       if (PyErr_CheckSignals() && PyErr_Occurred()) {
-        throw py::error_already_set();
+        nb::raise_python_error();
       }
       time_start = time_now;
     }
@@ -275,9 +271,9 @@ Returns the index of the first occurrence of the given value in the reader.
 Raises a ValueError if the value is not found.
 )";
 
-size_t IndexOf(const BagzReader& reader, py::bytes value, size_t start,
+size_t IndexOf(const BagzReader& reader, nb::bytes value, size_t start,
                std::optional<size_t> stop) {
-  absl::string_view bytes = py::cast<absl::string_view>(value);
+  absl::string_view bytes((const char*)value.data(), value.size());
   size_t index = start;
   auto reader_slice =
       reader.Slice(start, 1, stop.value_or(reader.size() - start));
@@ -290,7 +286,7 @@ size_t IndexOf(const BagzReader& reader, py::bytes value, size_t start,
                ++index;
                return false;
              })) {
-    throw py::value_error("value is not in the bagz.Reader");
+    throw nb::value_error("value is not in the bagz.Reader");
   }
   return index;
 }
@@ -299,8 +295,8 @@ constexpr char kContainsDoc[] = R"(
 Returns whether the given value is in the reader.
 )";
 
-bool Contains(const BagzReader& reader, py::bytes value) {
-  auto bytes = py::cast<absl::string_view>(value);
+bool Contains(const BagzReader& reader, nb::bytes value) {
+  absl::string_view bytes((const char*)value.data(), value.size());
   return AnyOf(reader,
                [bytes](absl::string_view record) { return record == bytes; });
 }
@@ -309,8 +305,8 @@ constexpr char kCountDoc[] = R"(
 Returns the number of occurrences of the given value in the reader.
 )";
 
-size_t Count(const BagzReader& reader, py::bytes value) {
-  auto bytes = py::cast<absl::string_view>(value);
+size_t Count(const BagzReader& reader, nb::bytes value) {
+  absl::string_view bytes((const char*)value.data(), value.size());
   size_t count = 0;
   AnyOf(reader, [bytes, &count](absl::string_view record) {
     if (record == bytes) {
@@ -324,16 +320,16 @@ size_t Count(const BagzReader& reader, py::bytes value) {
 // Iteration methods.
 
 struct MakeBytes {
-  py::bytes operator()(size_t num_bytes) const {
-    py::gil_scoped_acquire acquire;
-    return py::bytes(nullptr, num_bytes);
+  nb::bytes operator()(size_t num_bytes) const {
+    nb::gil_scoped_acquire acquire;
+    return nb::bytes(nullptr, num_bytes);
   }
 };
 
 struct SpanFromBytes {
-  absl::Span<char> operator()(const py::bytes& result) const {
+  absl::Span<char> operator()(const nb::bytes& result) const {
     char* bytes;
-    ssize_t num_bytes;
+    Py_ssize_t num_bytes;
     PyBytes_AsStringAndSize(result.ptr(), &bytes, &num_bytes);
     return absl::Span<char>(bytes, num_bytes);
   }
@@ -368,7 +364,7 @@ class ExceptionStore {
   PyObject* traceback_ = nullptr;
 };
 
-// Helper to read batches of indices from a Python iterator.
+// // Helper to read batches of indices from a Python iterator.
 class PythonBatchIterator {
  public:
   PythonBatchIterator(PyObject* indices_iter, ExceptionStore* exception_store)
@@ -385,7 +381,7 @@ class PythonBatchIterator {
     }
     indices.reserve(read_ahead);
     {
-      py::gil_scoped_acquire acquire;
+      nb::gil_scoped_acquire acquire;
       for (size_t index = 0; index < read_ahead; ++index) {
         PyObject* iter_obj = PyIter_Next(indices_iter_);
         if (iter_obj == nullptr) {
@@ -424,11 +420,11 @@ class PythonBatchIterator {
 
 class PythonIterator {
  public:
-  // Iterator that returns py::bytes. Ensures GIL is held when creating/copying
-  // py::bytes objects.
+  // Iterator that returns nb::bytes. Ensures GIL is held when creating/copying
+  // nb::bytes objects.
   using IteratorPyBytes =
       BagzIterator<MakeBytes, SpanFromBytes,
-                   decltype([] { return py::gil_scoped_acquire(); })>;
+                   decltype([] { return nb::gil_scoped_acquire(); })>;
 
   // Iterator that reads all records in the reader sequentially.
   PythonIterator(BagzReader reader, std::optional<size_t> read_ahead)
@@ -437,7 +433,7 @@ class PythonIterator {
 
   // Iterator that reads records in the reader according to the sequence if
   // indices returned by index_iter.
-  PythonIterator(BagzReader reader, py::object index_iter,
+  PythonIterator(BagzReader reader, nb::object index_iter,
                  std::optional<size_t> read_ahead)
       : exception_store_(std::make_unique<ExceptionStore>()),
         index_iter_(std::move(index_iter)),
@@ -448,30 +444,30 @@ class PythonIterator {
   PythonIterator(PythonIterator&&) = default;
   ~PythonIterator() {
     if (iterator_ != nullptr) {
-      py::gil_scoped_release release;
+      nb::gil_scoped_release release;
       iterator_ = nullptr;
     }
   }
 
-  py::bytes next() {
-    py::gil_scoped_release release;
-    std::optional<absl::StatusOr<py::bytes>> result = iterator_->next();
+  nb::bytes next() {
+    nb::gil_scoped_release release;
+    std::optional<absl::StatusOr<nb::bytes>> result = iterator_->next();
     if (!result.has_value()) {
       if (exception_store_ != nullptr && exception_store_->HasException()) {
-        py::gil_scoped_acquire acquire;
+        nb::gil_scoped_acquire acquire;
         exception_store_->Restore();
-        throw py::error_already_set();
+        nb::raise_python_error();
       }
-      throw py::stop_iteration();
+      throw nb::stop_iteration();
     }
     if (!result->ok()) {
       if (absl::IsAborted(result->status()) &&
           result->status().message().empty()) {
         if (exception_store_ != nullptr && exception_store_->HasException()) {
-          py::gil_scoped_acquire acquire;
+          nb::gil_scoped_acquire acquire;
           exception_store_->Restore();
           if (PyErr_Occurred()) {
-            throw py::error_already_set();
+            nb::raise_python_error();
           }
         }
       }
@@ -484,52 +480,116 @@ class PythonIterator {
   // Ensure exception_store_ address is valid if iterator is moved.
   // Can be Nullptr if no exception store is needed.
   std::unique_ptr<ExceptionStore> exception_store_;
-  py::object index_iter_;
+  nb::object index_iter_;
   std::unique_ptr<IteratorPyBytes> iterator_;
 };
 
 }  // namespace
 
-void RegisterBagzReader(py::module& m) {
+void RegisterBagzReader(nb::module_& m) {
   auto register_sequence =
-      py::module_::import("collections.abc").attr("Sequence").attr("register");
+      nb::module_::import_("collections.abc").attr("Sequence").attr("register");
 
-  auto reader = py::class_<BagzReader>(
+  auto reader = nb::class_<BagzReader>(
       m, "Reader", "For reading a collection of Bagz-formatted shards.");
 
-  auto reader_iterator = py::class_<PythonIterator>(
+  auto reader_iterator = nb::class_<PythonIterator>(
       m, "ReaderIterator", "Iterator for a BagzReader.");
 
-  py::class_<BagzReader::Options>(reader, "Options", kOptionsDoc + 1)
+  nb::class_<BagzReader::Options>(reader, "Options", kOptionsDoc + 1)
       .def(
-          py::init([](ShardingLayout sharding_layout,
-                      LimitsPlacement limits_placement, Compression compression,
-                      LimitsStorage limits_storage, int max_parallelism) {
-            return BagzReader::Options{
+          "__init__",
+          [](BagzReader::Options* self, ShardingLayout sharding_layout,
+             LimitsPlacement limits_placement, Compression compression,
+             LimitsStorage limits_storage, int max_parallelism) {
+            new (self) BagzReader::Options{
                 .sharding_layout = sharding_layout,
                 .limits_placement = limits_placement,
                 .compression = compression,
                 .limits_storage = limits_storage,
                 .max_parallelism = max_parallelism,
             };
-          }),
-          py::arg("sharding_layout") = BagzReader::Options{}.sharding_layout,
-          py::arg("limits_placement") = BagzReader::Options{}.limits_placement,
-          py::arg("compression") = BagzReader::Options{}.compression,
-          py::arg("limits_storage") = BagzReader::Options{}.limits_storage,
-          py::arg("max_parallelism") = BagzReader::Options{}.max_parallelism)
-      .def_readwrite("sharding_layout", &BagzReader::Options::sharding_layout)
-      .def_readwrite("limits_placement", &BagzReader::Options::limits_placement)
-      .def_readwrite("compression", &BagzReader::Options::compression)
-      .def_readwrite("limits_storage", &BagzReader::Options::limits_storage)
-      .def_readwrite("max_parallelism", &BagzReader::Options::max_parallelism);
+          },
+          nb::arg("sharding_layout") = BagzReader::Options{}.sharding_layout,
+          nb::arg("limits_placement") = BagzReader::Options{}.limits_placement,
+          nb::arg("compression") = BagzReader::Options{}.compression,
+          nb::arg("limits_storage") = BagzReader::Options{}.limits_storage,
+          nb::arg("max_parallelism") = BagzReader::Options{}.max_parallelism)
+      .def_rw("sharding_layout", &BagzReader::Options::sharding_layout)
+      .def_rw("limits_placement", &BagzReader::Options::limits_placement)
+      .def_rw("compression", &BagzReader::Options::compression)
+      .def_rw("limits_storage", &BagzReader::Options::limits_storage)
+      .def_rw("max_parallelism", &BagzReader::Options::max_parallelism)
+      .def("__getstate__",
+           [](const BagzReader::Options& options) {
+             return nb::make_tuple(
+                 options.sharding_layout, options.limits_placement,
+                 options.compression, options.limits_storage,
+                 options.max_parallelism, options.read_ahead_bytes);
+           })
+      .def("__setstate__", [](BagzReader::Options* self, nb::tuple t) {
+        if (t.size() != 6) {
+          throw nb::type_error("Invalid state for BagzReader.Options!");
+        }
+        new (self) BagzReader::Options{
+            .sharding_layout = nb::cast<ShardingLayout>(t[0]),
+            .limits_placement = nb::cast<LimitsPlacement>(t[1]),
+            .compression = nb::cast<Compression>(t[2]),
+            .limits_storage = nb::cast<LimitsStorage>(t[3]),
+            .max_parallelism = nb::cast<int>(t[4]),
+            .read_ahead_bytes = nb::cast<std::optional<size_t>>(t[5]),
+        };
+      });
 
   reader
-      .def(py::init(&Init), py::arg("file_spec"),
-           py::arg("options") = BagzReader::Options{}, py::doc(kInitDoc + 1))
+      .def(
+          "__init__",
+          [](BagzReader* self, nb::object file_spec_obj,
+             const BagzReader::Options& options) {
+            new (self) BagzReader(Init(file_spec_obj, options));
+          },
+          nb::arg("file_spec"), nb::arg("options") = BagzReader::Options{},
+          kInitDoc + 1)
+      .def_prop_ro("options", &BagzReader::options)
+      .def_prop_ro("file_spec", &BagzReader::filespec)
+      .def("__getstate__",
+           [](const BagzReader& reader) {
+             if (reader.filespec().empty()) {
+               throw nb::type_error(
+                   "Cannot pickle BagzReader opened without a file_spec path.");
+             }
+             return nb::make_tuple(reader.filespec(), reader.options(),
+                                   reader.slice_start(), reader.slice_step(),
+                                   reader.slice_length());
+           })
+      .def("__setstate__",
+           [](BagzReader* self, nb::tuple t) {
+             if (t.size() != 5) {
+               throw nb::type_error("Invalid state for BagzReader!");
+             }
+             std::string filespec = nb::cast<std::string>(t[0]);
+             BagzReader::Options options = nb::cast<BagzReader::Options>(t[1]);
+             size_t slice_start = nb::cast<size_t>(t[2]);
+             int64_t slice_step = nb::cast<int64_t>(t[3]);
+             size_t slice_length = nb::cast<size_t>(t[4]);
+
+             absl::StatusOr<BagzReader> reader =
+                 BagzReader::Open(filespec, std::move(options));
+             ThrowNonOkStatusAsException(reader.status());
+
+             if (slice_start == 0 && slice_step == 1 &&
+                 slice_length == reader->size()) {
+               new (self) BagzReader(std::move(*reader));
+               return;
+             }
+             absl::StatusOr<BagzReader> slice =
+                 reader->Slice(slice_start, slice_step, slice_length);
+             ThrowNonOkStatusAsException(slice.status());
+             new (self) BagzReader(std::move(*slice));
+           })
       .def("__len__", &BagzReader::size)
-      .def("__getitem__", &GetItem, py::arg("index"), py::doc(kGetItemDoc + 1))
-      .def("__getitem__", &GetSlice, py::arg("slice"), py::doc(kGetItemDoc + 1))
+      .def("__getitem__", &GetItem, nb::arg("index"), kGetItemDoc + 1)
+      .def("__getitem__", &GetSlice, nb::arg("slice"), kGetItemDoc + 1)
       .def("__reversed__",
            [](const BagzReader& reader) {
              if (reader.size() == 0) {
@@ -556,46 +616,42 @@ void RegisterBagzReader(py::module& m) {
             ThrowNonOkStatusAsException(reader_slice.status());
             return PythonIterator(*std::move(reader_slice), read_ahead);
           },
-          py::arg("start"), py::arg("num_records"), py::kw_only(),
-          py::arg("read_ahead") = std::nullopt)
+          nb::arg("start"), nb::arg("num_records"), nb::kw_only(),
+          nb::arg("read_ahead") = std::nullopt)
       .def(
           "read_indices_iter",
-          [](const BagzReader& reader, py::object indices_iterable,
+          [](const BagzReader& reader, nb::object indices_iterable,
              std::optional<size_t> read_ahead = std::nullopt) {
             PyObject* indices_iter = PyObject_GetIter(indices_iterable.ptr());
             if (PyErr_Occurred()) {
-              throw py::error_already_set();
+              nb::raise_python_error();
             }
-            return PythonIterator(
-                reader, py::reinterpret_steal<py::object>(indices_iter),
-                read_ahead);
+            return PythonIterator(reader, nb::steal<nb::object>(indices_iter),
+                                  read_ahead);
           },
-          py::arg("indices"), py::kw_only(),
-          py::arg("read_ahead") = std::nullopt)
+          nb::arg("indices"), nb::kw_only(),
+          nb::arg("read_ahead") = std::nullopt)
       .def("__iter__",
            [](const BagzReader& reader) {
              return PythonIterator(reader, std::nullopt);
            })
-      .def("__contains__", &Contains, py::arg("value"),
-           py::doc(kContainsDoc + 1))
-      .def("index", &IndexOf, py::arg("value"), py::arg("start") = 0,
-           py::arg("stop") = std::nullopt, py::doc(kIndexOfDoc + 1))
-      .def("count", &Count, py::arg("value"), py::doc(kCountDoc + 1))
-      .def("read_range", &ReadRange, py::arg("start"), py::arg("num_records"),
-           py::doc(kReadRangeDoc + 1))
-      .def("read_indices", &ReadIndicesFromNumpy<int64_t>, py::arg("indices"),
-           py::doc(kReadIndicesDoc + 1))
-      .def("read_indices", &ReadIndicesFromNumpy<uint64_t>, py::arg("indices"),
-           py::doc(kReadIndicesDoc + 1))
-      .def("read_indices", &ReadIndicesFromSlice, py::arg("indices"),
-           py::doc(kReadIndicesDoc + 1))
-      .def("read_indices", &ReadIndicesFromIterable, py::arg("indices"),
-           py::doc(kReadIndicesDoc + 1));
+      .def("__contains__", &Contains, nb::arg("value"), kContainsDoc + 1)
+      .def("index", &IndexOf, nb::arg("value"), nb::arg("start") = 0,
+           nb::arg("stop") = std::nullopt, kIndexOfDoc + 1)
+      .def("count", &Count, nb::arg("value"), kCountDoc + 1)
+      .def("read_range", &ReadRange, nb::arg("start"), nb::arg("num_records"),
+           kReadRangeDoc + 1)
+      .def("read_indices", &ReadIndicesFromNumpy<int64_t>, nb::arg("indices"),
+           kReadIndicesDoc + 1)
+      .def("read_indices", &ReadIndicesFromNumpy<uint64_t>, nb::arg("indices"),
+           kReadIndicesDoc + 1)
+      .def("read_indices", &ReadIndicesFromSlice, nb::arg("indices"),
+           kReadIndicesDoc + 1)
+      .def("read_indices", &ReadIndicesFromIterable, nb::arg("indices"),
+           kReadIndicesDoc + 1);
 
   reader_iterator.def("__next__", &PythonIterator::next);
-  reader_iterator.def(
-      "__iter__",
-      [](PythonIterator& iterator) -> PythonIterator& { return iterator; });
+  reader_iterator.def("__iter__", [](nb::handle self) { return self; });
   register_sequence(reader);
 }
 

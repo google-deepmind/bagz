@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,33 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "absl/base/no_destructor.h"
+#include "absl/log/absl_check.h"
+#include "src/file/file_systems/gcs/gcs_file_system.h"
 #include "src/file/registry/file_system_registry.h"
-#include "src/python/bagz_index.h"
-#include "src/python/bagz_multi_index.h"
-#include "src/python/bagz_options.h"
-#include "src/python/bagz_reader.h"
-#include "src/python/bagz_writer.h"
 #include "nanobind/nanobind.h"
 
 namespace bagz {
 namespace {
 
-namespace nb = nanobind;
+NB_MODULE(bagz_gcs, m) {
+  namespace nb = nanobind;
+  nb::module_ bagz_lib = nb::module_::import_("bagz.lib.bagz");
+  nb::capsule cap =
+      nb::cast<nb::capsule>(bagz_lib.attr("_get_registry_capsule")());
+  FileSystemRegistry* registry = static_cast<FileSystemRegistry*>(cap.data());
 
-NB_MODULE(bagz, m) {
-  m.doc() = "Bagz Python Bindings";
-  RegisterBagzIndex(m);
-  RegisterBagzMultiIndex(m);
-  RegisterBagzOptions(m);
-  RegisterBagzReader(m);
-  RegisterBagzWriter(m);
-
-  m.def("_get_registry_capsule", []() {
-    return nb::capsule(&FileSystemRegistry::Instance(), "FileSystemRegistry");
-  });
-
-  // Shim to allow `from bagz import bagz` for backward compatibility.
-  m.attr("bagz") = m;
+  static absl::NoDestructor<GcsFileSystem> gcs_fs;
+  ABSL_CHECK_OK(registry->Register("gs:", *gcs_fs));
 }
 
 }  // namespace

@@ -97,10 +97,11 @@ class InMemoryPReadFile : public PReadFile {
 }  // namespace
 
 struct BagzReader::State {
-  State(BagzReader::Options options,
+  State(std::string filespec, BagzReader::Options options,
         std::vector<internal::BagzShardReader> shards,
         std::vector<size_t> accumulated_count)
-      : options_(std::move(options)),
+      : filespec_(std::move(filespec)),
+        options_(std::move(options)),
         shards_(std::move(shards)),
         shard_indexing_(
             std::move(accumulated_count),
@@ -113,6 +114,9 @@ struct BagzReader::State {
       };
     }
   }
+
+  const BagzReader::Options& options() const { return options_; }
+  const std::string& filespec() const { return filespec_; }
 
   [[nodiscard]] size_t size() const { return shard_indexing_.size(); }
 
@@ -290,8 +294,6 @@ struct BagzReader::State {
     return static_cast<double>(num_bytes) / num_records;
   }
 
-  const BagzReader::Options& options() const { return options_; }
-
  private:
   static absl::Status DecompressInto(
       internal::ZstdDecompressor* decompressor, absl::string_view compressed,
@@ -342,6 +344,7 @@ struct BagzReader::State {
         /*cpu_bound=*/decompressor_factory_ != nullptr);
   }
 
+  std::string filespec_;
   Options options_;
   std::vector<internal::BagzShardReader> shards_;
   internal::ShardIndexing shard_indexing_;
@@ -512,7 +515,7 @@ absl::Status BagzReader::ReadIndicesWithAllocator(
 absl::StatusOr<BagzReader> BagzReader::OpenFiles(
     absl::Span<absl_nonnull std::unique_ptr<PReadFile>> record_files,
     absl::Span<absl_nonnull std::unique_ptr<PReadFile>> limits_files,
-    Options options) {
+    Options options, std::string filespec) {
   if (std::holds_alternative<CompressionAutoDetect>(options.compression)) {
     return absl::InvalidArgumentError(
         "Compression must not be kAutoDetect when calling "
@@ -588,8 +591,8 @@ absl::StatusOr<BagzReader> BagzReader::OpenFiles(
     }
   }
   return BagzReader(
-      std::make_shared<State>(std::move(options), std::move(shards),
-                              std::move(accumulated_count)),
+      std::make_shared<State>(std::move(filespec), std::move(options),
+                              std::move(shards), std::move(accumulated_count)),
       /*slice_start=*/0, /*slice_step=*/1, /*slice_length=*/total_count);
 }
 
@@ -622,7 +625,8 @@ absl::StatusOr<BagzReader> BagzReader::Open(absl::string_view filespec,
     }
     record_files = absl::MakeSpan(*all_files);
   }
-  return OpenFiles(record_files, limits_files, std::move(options));
+  return OpenFiles(record_files, limits_files, std::move(options),
+                   std::string(filespec));
 }
 
 absl::StatusOr<BagzReader::Handle> BagzReader::ReadHandle(size_t index) const {
@@ -687,6 +691,10 @@ absl::StatusOr<BagzReader> BagzReader::Slice(size_t start, int64_t step,
 
 const BagzReader::Options& BagzReader::options() const {
   return state_->options();
+}
+
+absl::string_view BagzReader::filespec() const {
+  return state_ != nullptr ? absl::string_view(state_->filespec()) : "";
 }
 
 }  // namespace bagz

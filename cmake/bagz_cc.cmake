@@ -31,7 +31,7 @@ macro(bagz_cc_library NAME)
 
     if(PARSED_ARGS_SOURCES)
         # Create a static library
-        add_library(${NAME} STATIC ${PARSED_ARGS_SOURCES} ${PARSED_ARGS_HEADERS})
+        add_library(${NAME} ${PARSED_ARGS_SOURCES} ${PARSED_ARGS_HEADERS})
         target_include_directories(${NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
         if(PARSED_ARGS_DEPS)
             target_link_libraries(${NAME} PRIVATE ${PARSED_ARGS_DEPS})
@@ -61,14 +61,14 @@ macro(bagz_cc_library NAME)
 endmacro()
 
 
-# Macro for creating pybind11 Python modules
+# Macro for creating nanobind Python modules
 # Usage:
-# bagz_pybind11_extension(module_name
+# bagz_nanobind_extension(module_name
 #   SOURCES src1.cc src2.cc ...
 #   [DEPS dep1 dep2 ...]
 #   [ALWAYS_LINK_DEPS dep1 dep2 ...]
 # )
-macro(bagz_pybind11_extension NAME)
+macro(bagz_nanobind_extension NAME)
     cmake_parse_arguments(
         PARSED_ARGS
         "" # OPTIONS
@@ -78,10 +78,15 @@ macro(bagz_pybind11_extension NAME)
     )
 
     if(NOT PARSED_ARGS_SOURCES)
-        message(FATAL_ERROR "bagz_pybind11_extension ${NAME} requires SOURCES to be specified.")
+        message(FATAL_ERROR "bagz_nanobind_extension ${NAME} requires SOURCES to be specified.")
     endif()
 
-    pybind11_add_module(${NAME} SHARED ${PARSED_ARGS_SOURCES})
+    set(_NB_FLAGS "FREE_THREADED")
+    if(Python_VERSION VERSION_GREATER_EQUAL "3.12")
+        list(APPEND _NB_FLAGS STABLE_ABI)
+    endif()
+
+    nanobind_add_module(${NAME} ${_NB_FLAGS} ${PARSED_ARGS_SOURCES})
 
     # Add the directory where the macro is called to the include path.
     # This allows sources to include headers relative to this directory,
@@ -101,3 +106,4 @@ macro(bagz_pybind11_extension NAME)
     endif()
 
 endmacro()
+

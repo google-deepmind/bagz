@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FetchContent_Declare(
-  pybind11
-  GIT_REPOSITORY https://github.com/pybind/pybind11.git
-  GIT_TAG a2e59f0e7065404b44dfe92a28aca47ba1378dc4 # v2.13
-  GIT_SHALLOW TRUE
-  OVERRIDE_FIND_PACKAGE
-  EXCLUDE_FROM_ALL
-)
+find_package(nanobind CONFIG QUIET)
 
-FetchContent_MakeAvailable(pybind11)
+if(NOT nanobind_FOUND)
+  FetchContent_Declare(
+    nanobind
+    GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+    GIT_TAG e2dc00f7a34f935c6cf91948776d59c4709e9fe6
+    OVERRIDE_FIND_PACKAGE
+    EXCLUDE_FROM_ALL
+  )
+
+  FetchContent_MakeAvailable(nanobind)
+endif()
