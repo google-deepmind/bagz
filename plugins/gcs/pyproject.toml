@@ -22,6 +22,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -69,9 +70,9 @@ cmake.source-dir = "."
 [tool.cibuildwheel]
 manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:2024.12.16-1"
 build = [
-    "cp310-manylinux_x86_64",
-    "cp311-manylinux_x86_64",
-    "cp312-manylinux_x86_64",
+    "cp310-*",
+    "cp311-*",
+    "cp312-*",
 ]
 
 [tool.cibuildwheel.linux]
@@ -85,3 +86,9 @@ yum install -y libcurl-devel openssl3-devel \
     && ln -s libcrypto.so.3 /usr/lib64/libcrypto.so
 '''
 repair-wheel-command = "auditwheel repair --strip --exclude libcurl.so.4 --exclude libssl.so.3 --exclude libcrypto.so.3 -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+
+[tool.cibuildwheel.macos.environment]
+MACOSX_DEPLOYMENT_TARGET = "11.0"

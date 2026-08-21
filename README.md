@@ -22,7 +22,7 @@ To support reading from GCS:
 uv pip install .[GCS]
 ```
 
-On Linux you can install the latest version from PyPI.
+On Linux and macOS you can install the latest version from PyPI.
 
 ```sh
 uv pip install bagz
@@ -34,20 +34,30 @@ If you want GCS support install bagz-gcs:
 uv pip install bagz-gcs
 ```
 
-To build wheels it is recommended to use podman.
+To build wheels locally it is recommended to use cibuildwheel.
+
+On Linux (using podman):
 
 ```sh
 sudo apt install podman
-```
 
-```sh
 rm -rf dist/
-
 python3 -m build --sdist --outdir dist .
 python3 -m build --sdist --outdir dist plugins/gcs
 
 CIBW_CONTAINER_ENGINE="podman" cibuildwheel --platform linux dist/bagz-*.tar.gz
 CIBW_CONTAINER_ENGINE="podman" cibuildwheel --platform linux dist/bagz_gcs-*.tar.gz
+```
+
+On macOS:
+
+```sh
+rm -rf dist/
+python3 -m build --sdist --outdir dist .
+python3 -m build --sdist --outdir dist plugins/gcs
+
+cibuildwheel --platform macos dist/bagz-*.tar.gz
+cibuildwheel --platform macos dist/bagz_gcs-*.tar.gz
 ```
 
 ## Python API

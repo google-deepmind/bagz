@@ -52,10 +52,16 @@ macro(bagz_cc_library NAME)
             target_link_libraries(${NAME} INTERFACE ${PARSED_ARGS_DEPS})
         endif()
         if(PARSED_ARGS_ALWAYS_LINK_DEPS)
-            target_link_libraries(${NAME}
-                INTERFACE -Wl,--whole-archive
-                ${PARSED_ARGS_ALWAYS_LINK_DEPS}
-                -Wl,--no-whole-archive)
+            if(APPLE)
+                target_link_libraries(${NAME}
+                    INTERFACE -Wl,-all_load
+                    ${PARSED_ARGS_ALWAYS_LINK_DEPS})
+            else()
+                target_link_libraries(${NAME}
+                    INTERFACE -Wl,--whole-archive
+                    ${PARSED_ARGS_ALWAYS_LINK_DEPS}
+                    -Wl,--no-whole-archive)
+            endif()
         endif()
     endif()
 endmacro()
@@ -99,10 +105,16 @@ macro(bagz_nanobind_extension NAME)
     endif()
 
     if(PARSED_ARGS_ALWAYS_LINK_DEPS)
-        target_link_libraries(${NAME}
-            PRIVATE -Wl,--whole-archive
-            ${PARSED_ARGS_ALWAYS_LINK_DEPS}
-            -Wl,--no-whole-archive)
+        if(APPLE)
+            target_link_libraries(${NAME}
+                PRIVATE -Wl,-all_load
+                ${PARSED_ARGS_ALWAYS_LINK_DEPS})
+        else()
+            target_link_libraries(${NAME}
+                PRIVATE -Wl,--whole-archive
+                ${PARSED_ARGS_ALWAYS_LINK_DEPS}
+                -Wl,--no-whole-archive)
+        endif()
     endif()
 
 endmacro()
