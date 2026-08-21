@@ -17,10 +17,21 @@ location that cmake's `find_package` searches.
 uv pip install .
 ```
 
+To support reading from GCS:
+```sh
+uv pip install .[GCS]
+```
+
 On Linux you can install the latest version from PyPI.
 
 ```sh
 uv pip install bagz
+```
+
+If you want GCS support install bagz-gcs:
+
+```sh
+uv pip install bagz-gcs
 ```
 
 To build wheels it is recommended to use podman.
