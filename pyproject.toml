@@ -69,9 +69,6 @@ TEST_TMPDIR = "${PWD}/test_tmpdir"
 [tool.cibuildwheel.linux]
 repair-wheel-command = "auditwheel repair --strip -w {dest_dir} {wheel}"
 
-[tool.cibuildwheel.macos]
-archs = ["x86_64", "arm64"]
-
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "11.0"
 
