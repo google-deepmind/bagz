@@ -29,6 +29,8 @@ jobs:
   test:
     name: test (${{ matrix.os }}, ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]

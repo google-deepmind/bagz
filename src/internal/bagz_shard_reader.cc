@@ -65,7 +65,7 @@ absl::StatusOr<BagzShardReader::ByteRange> BagzShardReader::ReadByteRange(
   }
   const size_t records_size = records_->size();
   if (records_size == 0) {
-    return ByteRange(0, 0);
+    return ByteRange{0, 0};
   }
   uint64_t range[2] = {0, 0};
   if (index == 0) {
@@ -82,7 +82,7 @@ absl::StatusOr<BagzShardReader::ByteRange> BagzShardReader::ReadByteRange(
   }
 
   if (range[0] <= range[1] && range[1] <= records_size) {
-    return ByteRange(range[0], range[1] - range[0]);
+    return ByteRange{range[0], range[1] - range[0]};
   } else {
     return absl::InvalidArgumentError("Bad file format.");
   }
