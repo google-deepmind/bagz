@@ -70,6 +70,7 @@ cmake.source-dir = "."
 [tool.cibuildwheel]
 manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64:2024.12.16-1"
 archs = ["auto64"]
+skip = ["*musllinux*"]
 build = [
     "cp310-*",
     "cp311-*",
@@ -81,10 +82,14 @@ build = [
 # CentOS, openssl3 will be suffixed, as openssl 1.1 is the default. This means
 # that cmake cannot find it at the usual location.
 before-all = '''
-yum install -y libcurl-devel openssl3-devel \
-    && ln -s openssl3/openssl /usr/include/openssl \
-    && ln -s libssl.so.3 /usr/lib64/libssl.so \
-    && ln -s libcrypto.so.3 /usr/lib64/libcrypto.so
+if command -v yum >/dev/null 2>&1; then
+    yum install -y libcurl-devel openssl3-devel \
+        && ln -sf openssl3/openssl /usr/include/openssl \
+        && ln -sf libssl.so.3 /usr/lib64/libssl.so \
+        && ln -sf libcrypto.so.3 /usr/lib64/libcrypto.so
+elif command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq && apt-get install -y --no-install-recommends libcurl4-openssl-dev libssl-dev
+fi
 '''
 repair-wheel-command = "auditwheel repair --strip --exclude libcurl.so.4 --exclude libssl.so.3 --exclude libcrypto.so.3 -w {dest_dir} {wheel}"
 
