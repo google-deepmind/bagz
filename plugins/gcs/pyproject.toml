@@ -87,8 +87,5 @@ yum install -y libcurl-devel openssl3-devel \
 '''
 repair-wheel-command = "auditwheel repair --strip --exclude libcurl.so.4 --exclude libssl.so.3 --exclude libcrypto.so.3 -w {dest_dir} {wheel}"
 
-[tool.cibuildwheel.macos]
-archs = ["x86_64", "arm64"]
-
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "11.0"
