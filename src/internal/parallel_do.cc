@@ -19,14 +19,14 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
-#include <semaphore>  // NOLINT(build/c++20)
-#include <thread>     // NOLINT(build/c++11)
+#include <thread>  // NOLINT(build/c++11)
 #include <utility>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
+#include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
 
 namespace bagz::internal {
@@ -92,9 +92,9 @@ class ParallelOperationImpl : public ParallelOperation {
  public:
   ParallelOperationImpl(
       absl::AnyInvocable<void(const std::atomic_bool& cancelled)> func)
-      : func_(std::move(func)), cancelled_(false), done_{0}, thread_([this]() {
+      : func_(std::move(func)), cancelled_(false), thread_([this]() {
           func_(cancelled_);
-          done_.release();
+          done_.Notify();
         }) {}
 
   virtual ~ParallelOperationImpl() {
@@ -109,7 +109,7 @@ class ParallelOperationImpl : public ParallelOperation {
       thread_.join();
       return true;
     } else {
-      if (done_.try_acquire_for(absl::ToChronoMilliseconds(duration))) {
+      if (done_.WaitForNotificationWithTimeout(duration)) {
         thread_.join();
         return true;
       }
@@ -122,7 +122,7 @@ class ParallelOperationImpl : public ParallelOperation {
  private:
   absl::AnyInvocable<void(const std::atomic_bool& cancelled)> func_;
   std::atomic_bool cancelled_;
-  std::binary_semaphore done_;
+  absl::Notification done_;
   std::thread thread_;
 };
 

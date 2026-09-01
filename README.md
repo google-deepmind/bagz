@@ -19,7 +19,7 @@ uv pip install .
 
 To support reading from GCS:
 ```sh
-uv pip install .[GCS]
+uv pip install '.[GCS]'
 ```
 
 On Linux and macOS you can install the latest version from PyPI.
