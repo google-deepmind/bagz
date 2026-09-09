@@ -14,31 +14,21 @@
 
 #include "src/file/file_system/string_pread_file.h"
 
-#include <algorithm>
 #include <cstddef>
+#include <cstring>
 
-#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
-#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 
 namespace bagz {
 
-absl::Status StringPReadFile::PRead(
-    size_t offset, size_t num_bytes,
-    absl::FunctionRef<bool(absl::string_view)> callback) const {
-  if (num_bytes > content_.size() || offset > content_.size() - num_bytes) {
+absl::Status StringPReadFile::PRead(size_t offset,
+                                    absl::Span<char> destination) const {
+  if (destination.size() > content_.size() ||
+      offset > content_.size() - destination.size()) {
     return absl::OutOfRangeError("PRead out of range");
   }
-  if (chunk_size_ > 0) {
-    for (size_t i = 0; i < num_bytes; i += chunk_size_) {
-      size_t size = std::min(chunk_size_, num_bytes - i);
-      if (!callback(absl::string_view(content_).substr(offset + i, size))) {
-        return absl::OkStatus();
-      }
-    }
-  } else {
-    callback(absl::string_view(content_).substr(offset, num_bytes));
-  }
+  std::memcpy(destination.data(), content_.data() + offset, destination.size());
   return absl::OkStatus();
 }
 

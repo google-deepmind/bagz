@@ -28,6 +28,10 @@
 
 namespace bagz {
 
+// The ABI version of the FileSystem and PReadFile interfaces.
+// Any external plugin (e.g. bagz-gcs) must match this ABI version.
+inline constexpr int kFileSystemAbiVersion = 2;
+
 // Result of resolving a filename_with_prefix to a file system and filename.
 struct ResolvedFile {
   // The file system that handles the file.

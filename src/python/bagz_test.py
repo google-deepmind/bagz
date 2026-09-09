@@ -549,6 +549,26 @@ class BagTest(parameterized.TestCase):
 
     self.assertEqual(results, records)
 
+  def test_filesystem_abi_version(self) -> None:
+    self.assertEqual(bagz.FILESYSTEM_ABI_VERSION, 2)
+    get_capsule = getattr(bagz, '_get_registry_capsule', None)
+    if get_capsule is None and hasattr(bagz, 'lib'):
+      get_capsule = getattr(bagz.lib.bagz, '_get_registry_capsule', None)
+    self.assertIsNotNone(
+        get_capsule,
+        'Could not find _get_registry_capsule on bagz or bagz.lib.bagz',
+    )
+    cap = get_capsule(bagz.FILESYSTEM_ABI_VERSION)
+    self.assertIsNotNone(cap)
+    with self.assertRaisesRegex(
+        RuntimeError, 'Incompatible bagz filesystem ABI'
+    ):
+      get_capsule()
+    with self.assertRaisesRegex(
+        RuntimeError, 'Incompatible bagz filesystem ABI'
+    ):
+      get_capsule(999)
+
 
 def _read_worker_helper(reader: bagz.Reader, idx: int) -> bytes:
   return reader[idx]

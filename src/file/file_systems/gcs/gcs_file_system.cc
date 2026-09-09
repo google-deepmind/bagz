@@ -32,6 +32,7 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
+#include "absl/types/span.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/shard_spec.h"
 #include "src/file/file_system/write_file.h"
@@ -83,9 +84,9 @@ class GcsPReadFile : public PReadFile {
   }
   size_t size() const override { return size_; }
 
-  absl::Status PRead(
-      size_t offset, size_t num_bytes,
-      absl::FunctionRef<bool(absl::string_view)> callback) const override {
+  absl::Status PRead(size_t offset,
+                     absl::Span<char> destination) const override {
+    const size_t num_bytes = destination.size();
     if (num_bytes > size()) {
       return absl::OutOfRangeError(
           absl::StrCat("Invalid range: size  > file size (here: ", num_bytes,
@@ -97,20 +98,25 @@ class GcsPReadFile : public PReadFile {
           size() - num_bytes, ")"));
     }
     if (num_bytes == 0) {
-      callback(absl::string_view{});
       return absl::OkStatus();
     }
 
     gcs::ObjectReadStream reader = client_->ReadObject(
         bucket_name_, object_name_, gcs::ReadRange(offset, offset + num_bytes));
 
-    std::string contents{std::istreambuf_iterator<char>(reader), {}};
+    reader.read(destination.data(), num_bytes);
 
-    if (reader.status().ok()) {
-      callback(contents);
+    if (!reader.status().ok()) {
+      return ConvertStatus(reader.status());
+    }
+    if (reader.bad() ||
+        reader.gcount() != static_cast<std::streamsize>(num_bytes)) {
+      return absl::DataLossError(
+          absl::StrCat("Failed to read all requested bytes from GCS: expected ",
+                       num_bytes, ", got ", reader.gcount()));
     }
 
-    return ConvertStatus(reader.status());
+    return absl::OkStatus();
   }
 
   const std::string& Name() const { return object_name_; }
