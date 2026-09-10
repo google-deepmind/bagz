@@ -388,7 +388,7 @@ class BagTest(parameterized.TestCase):
             strict=True,
         )
     ):
-      expected_record = _generate_record(index)
+      expected_record = _generate_record(index)  # pyrefly: ignore[bad-argument-type]
       self.assertEqual(record_index_iter, expected_record, msg=f'row: {row}')
       self.assertEqual(record_from_index, records[index], msg=f'row: {row}')
 
