@@ -27,6 +27,7 @@
 #include "absl/cleanup/cleanup.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -552,6 +553,14 @@ void RegisterBagzReader(nb::module_& m) {
           kInitDoc + 1)
       .def_prop_ro("options", &BagzReader::options)
       .def_prop_ro("file_spec", &BagzReader::filespec)
+      .def("__repr__",
+           [](const BagzReader& reader) {
+             return absl::StrCat(
+                 "Reader(file_spec=", reader.filespec(),
+                 ", slice_start=", reader.slice_start(),
+                 ", slice_step=", reader.slice_step(),
+                 ", slice_length=", reader.slice_length(), ")");
+           })
       .def("__getstate__",
            [](const BagzReader& reader) {
              if (reader.filespec().empty()) {
