@@ -476,6 +476,23 @@ class BagTest(parameterized.TestCase):
         next(item_iter)
       del item_iter
 
+  def test_reader_repr(self) -> None:
+    file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
+    with bagz.Writer(file) as writer:
+      for rec in _generate_records(_NUM_RECORDS):
+        writer.write(rec)
+
+    reader = bagz.Reader(file)
+    self.assertEqual(repr(reader), repr(bagz.Reader(file)))
+    self.assertEqual(
+        repr(reader),
+        (
+            f'Reader(file_spec={file}, slice_start=0, slice_step=1, '
+            f'slice_length={_NUM_RECORDS})'
+        ),
+    )
+    self.assertNotEqual(repr(reader), repr(reader[1:]))
+
   def test_reader_pickle(self) -> None:
     file = pathlib.Path(self.create_tempdir()) / 'data.bagz'
     records = list(_generate_records(_NUM_RECORDS))
