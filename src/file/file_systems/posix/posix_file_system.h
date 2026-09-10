@@ -21,6 +21,7 @@
 #include <memory>
 #include <vector>
 
+#include "absl/base/call_once.h"
 #include "absl/base/nullability.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -34,6 +35,15 @@ namespace bagz {
 // An implementation of FileSystem in terms of standard C++ and POSIX file
 // operations. Note that WriteFile and PReadFile uses POSIX operations.
 class PosixFileSystem : public FileSystem {
+ public:
+  class EvictionQueue;
+
+  PosixFileSystem();
+  ~PosixFileSystem() override;
+
+  PosixFileSystem(const PosixFileSystem&) = delete;
+  PosixFileSystem& operator=(const PosixFileSystem&) = delete;
+
  protected:
   absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
       absl::string_view filename_without_prefix,
@@ -49,6 +59,12 @@ class PosixFileSystem : public FileSystem {
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
                 absl::string_view options) const override;
+
+ private:
+  EvictionQueue* GetEvictionQueue() const;
+
+  mutable absl::once_flag eviction_queue_init_once_;
+  mutable std::unique_ptr<EvictionQueue> eviction_queue_;
 };
 
 }  // namespace bagz

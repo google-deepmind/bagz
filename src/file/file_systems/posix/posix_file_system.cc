@@ -16,10 +16,13 @@
 
 #include <fcntl.h>
 #include <glob.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -28,13 +31,19 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/call_once.h"
 #include "absl/base/nullability.h"
+#include "absl/base/thread_annotations.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "src/file/file_system/file_system.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/shard_spec.h"
@@ -43,21 +52,20 @@
 namespace bagz {
 namespace {
 
-class MmapDeleter {
- public:
-  explicit MmapDeleter(size_t mmap_size) : mmap_size_(mmap_size) {}
-  void operator()(const void* mmap) const {
-    munmap(const_cast<void*>(mmap), mmap_size_);
-  }
-  size_t mmap_size() const { return mmap_size_; }
+struct MmapArea {
+  void* addr = nullptr;
+  size_t size = 0;
 
- private:
-  size_t mmap_size_;
+  ~MmapArea() {
+    if (addr != nullptr && addr != MAP_FAILED && size > 0) {
+      munmap(addr, size);
+    }
+  }
 };
 
-using MmapUniquePtr = std::unique_ptr<void, MmapDeleter>;
+using MmapSharedPtr = std::shared_ptr<MmapArea>;
 
-absl::StatusOr<MmapUniquePtr> MmapFile(const std::string& filename) {
+absl::StatusOr<MmapSharedPtr> MmapFile(const std::string& filename) {
   int fd = open(filename.c_str(), O_RDONLY);
   if (fd < 0) {
     return absl::ErrnoToStatus(errno, "open");
@@ -71,7 +79,7 @@ absl::StatusOr<MmapUniquePtr> MmapFile(const std::string& filename) {
   // We cannot mmap an empty file but we can use an empty string_view.
   if (stat.st_size == 0) {
     close(fd);
-    return MmapUniquePtr(nullptr, MmapDeleter(0));
+    return std::make_shared<MmapArea>();
   }
 
   void* records_mmap =
@@ -86,13 +94,158 @@ absl::StatusOr<MmapUniquePtr> MmapFile(const std::string& filename) {
       return absl::ErrnoToStatus(errno, "mmap");
     }
   }
-  return MmapUniquePtr(records_mmap, MmapDeleter(stat.st_size));
+  auto area = std::make_shared<MmapArea>();
+  area->addr = records_mmap;
+  area->size = stat.st_size;
+  return area;
 }
+
+}  // namespace
+
+class PosixFileSystem::EvictionQueue {
+ public:
+  EvictionQueue() = default;
+
+  ~EvictionQueue() { Stop(); }
+
+  void Stop() {
+    {
+      absl::MutexLock lock(mutex_);
+      if (stop_) return;
+      stop_ = true;
+      cv_.Signal();
+    }
+    if (worker_started_.load(std::memory_order_acquire)) {
+      pthread_join(worker_thread_, nullptr);
+      worker_started_.store(false, std::memory_order_release);
+    }
+  }
+
+  void Add(std::weak_ptr<MmapArea> mapping, void* addr, size_t size) {
+    if (size == 0 || addr == nullptr) return;
+    absl::call_once(start_once_, [this]() {
+      if (pthread_create(&worker_thread_, nullptr, &EvictionQueue::ThreadMain,
+                         this) == 0) {
+        worker_started_.store(true, std::memory_order_release);
+      }
+    });
+    absl::MutexLock lock(mutex_);
+    if (stop_) return;
+    if (pending_.size() < kMaxQueueSize) {
+      bool was_empty = pending_.empty();
+      pending_.push_back({std::move(mapping), addr, size});
+      if (was_empty || pending_.size() >= kFlushThreshold) {
+        cv_.Signal();
+      }
+    }
+  }
+
+ private:
+  static void* ThreadMain(void* arg) {
+#if defined(__linux__)
+    pthread_setname_np(pthread_self(), "bagz_evict");
+#endif
+    static_cast<EvictionQueue*>(arg)->Run();
+    return nullptr;
+  }
+
+  struct EvictionItem {
+    std::weak_ptr<MmapArea> mapping;
+    void* addr;
+    size_t size;
+  };
+
+  static constexpr size_t kMaxQueueSize = 65536;
+  static constexpr size_t kFlushThreshold = 4096;
+  static constexpr absl::Duration kFlushInterval = absl::Seconds(1);
+
+  void Run() {
+    std::vector<EvictionItem> to_process;
+    while (true) {
+      {
+        absl::MutexLock lock(mutex_);
+        while (!stop_ && pending_.empty()) {
+          cv_.Wait(&mutex_);
+        }
+        if (stop_ && pending_.empty()) {
+          break;
+        }
+        absl::Time deadline = absl::Now() + kFlushInterval;
+        while (!stop_ && pending_.size() < kFlushThreshold) {
+          if (cv_.WaitWithDeadline(&mutex_, deadline)) {
+            break;
+          }
+        }
+        if (stop_ && pending_.empty()) {
+          break;
+        }
+        to_process.swap(pending_);
+      }
+      if (!to_process.empty()) {
+        ProcessRanges(to_process);
+        to_process.clear();
+      }
+    }
+  }
+
+  static void ProcessRanges(std::vector<EvictionItem>& items) {
+    const size_t page_size = sysconf(_SC_PAGESIZE);
+    std::vector<std::shared_ptr<MmapArea>> active_mappings;
+    std::vector<std::pair<uintptr_t, uintptr_t>> page_ranges;
+    page_ranges.reserve(items.size());
+
+    for (auto& item : items) {
+      if (auto locked = item.mapping.lock()) {
+        active_mappings.push_back(std::move(locked));
+        uintptr_t start = reinterpret_cast<uintptr_t>(item.addr);
+        uintptr_t end = start + item.size;
+        uintptr_t page_start = start & ~(page_size - 1);
+        uintptr_t page_end = (end + page_size - 1) & ~(page_size - 1);
+        page_ranges.push_back({page_start, page_end});
+      }
+    }
+
+    if (page_ranges.empty()) {
+      return;
+    }
+
+    std::sort(page_ranges.begin(), page_ranges.end());
+
+    std::vector<std::pair<uintptr_t, uintptr_t>> merged;
+    merged.reserve(page_ranges.size());
+    for (const auto& r : page_ranges) {
+      if (merged.empty()) {
+        merged.push_back(r);
+      } else if (r.first <= merged.back().second) {
+        merged.back().second = std::max(merged.back().second, r.second);
+      } else {
+        merged.push_back(r);
+      }
+    }
+
+    for (const auto& [start, end] : merged) {
+      madvise(reinterpret_cast<void*>(start), end - start, MADV_DONTNEED);
+    }
+  }
+
+  absl::once_flag start_once_;
+  absl::Mutex mutex_;
+  absl::CondVar cv_;
+  bool stop_ ABSL_GUARDED_BY(mutex_) = false;
+  std::vector<EvictionItem> pending_ ABSL_GUARDED_BY(mutex_);
+  pthread_t worker_thread_{};
+  std::atomic<bool> worker_started_{false};
+};
+
+namespace {
 
 class PosixPReadFile : public PReadFile {
  public:
-  explicit PosixPReadFile(MmapUniquePtr mmap) : mmap_(std::move(mmap)) {}
-  size_t size() const override { return mmap_.get_deleter().mmap_size(); }
+  explicit PosixPReadFile(
+      MmapSharedPtr mmap,
+      PosixFileSystem::EvictionQueue* eviction_queue = nullptr)
+      : mmap_(std::move(mmap)), eviction_queue_(eviction_queue) {}
+  size_t size() const override { return mmap_ ? mmap_->size : 0; }
 
   absl::Status PRead(
       size_t offset, size_t num_bytes,
@@ -101,13 +254,21 @@ class PosixPReadFile : public PReadFile {
     if (num_bytes > mmap_size || offset > mmap_size - num_bytes) {
       return absl::OutOfRangeError("Invalid read");
     }
-    callback(absl::string_view(static_cast<const char*>(mmap_.get()) + offset,
-                               num_bytes));
+    if (num_bytes == 0) {
+      callback(absl::string_view{});
+      return absl::OkStatus();
+    }
+    const char* addr = static_cast<const char*>(mmap_->addr) + offset;
+    callback(absl::string_view(addr, num_bytes));
+    if (eviction_queue_ != nullptr) {
+      eviction_queue_->Add(mmap_, const_cast<char*>(addr), num_bytes);
+    }
     return absl::OkStatus();
   }
 
  private:
-  MmapUniquePtr mmap_;
+  MmapSharedPtr mmap_;
+  PosixFileSystem::EvictionQueue* eviction_queue_ = nullptr;
 };
 
 class PosixWriteFile : public WriteFile {
@@ -178,15 +339,28 @@ PosixFileSystem::OpenWrite(absl::string_view filename, uint64_t offset,
   return std::make_unique<PosixWriteFile>(std::move(file));
 }
 
+PosixFileSystem::PosixFileSystem() = default;
+
+PosixFileSystem::~PosixFileSystem() = default;
+
+PosixFileSystem::EvictionQueue* PosixFileSystem::GetEvictionQueue() const {
+  absl::call_once(eviction_queue_init_once_, [this]() {
+    eviction_queue_ = std::make_unique<EvictionQueue>();
+  });
+  return eviction_queue_.get();
+}
+
 absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>>
 PosixFileSystem::OpenPRead(absl::string_view filename,
                            absl::string_view options) const {
   std::string filename_str(filename);
-  absl::StatusOr<MmapUniquePtr> mmap = MmapFile(filename_str.c_str());
+  absl::StatusOr<MmapSharedPtr> mmap = MmapFile(filename_str.c_str());
   if (!mmap.ok()) {
     return mmap.status();
   }
-  return std::make_unique<PosixPReadFile>(*std::move(mmap));
+  EvictionQueue* queue =
+      absl::StrContains(options, "no_evict") ? nullptr : GetEvictionQueue();
+  return std::make_unique<PosixPReadFile>(*std::move(mmap), queue);
 }
 
 absl::Status PosixFileSystem::Delete(absl::string_view filename,
