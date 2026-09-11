@@ -18,10 +18,10 @@
 #include <cstddef>
 #include <string>
 
-#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 
 namespace bagz {
 
@@ -35,25 +35,14 @@ class PReadFile {
   // Returns the size of the file in bytes.
   virtual size_t size() const = 0;
 
-  // Reads `num_bytes` starting at `offset`. Returns OutOfRangeError if
-  // `offset + num_bytes` is greater than `size()`.
-  //
-  // The result is split into non-empty pieces and `callback` is invoked
-  // sequentially (but not necessarily from the same thread) for each non-empty
-  // piece until the total num_bytes is reached or `callback` returns false. If
-  // `num_bytes` is zero, `callback` is not invoked. The reader may chose not to
-  // split the result into pieces and will invoke `callback` only once.
-  //
-  // PRead will return an `OkStatus` if either `callback` returns `false`, or
-  // `callback` was called with pieces whose sizes accumulate to `num_bytes`.
-  // Otherwise an error is returned. The accumulated size of the pieces is
-  // guaranteed to be less than or equal to `num_bytes`.
+  // Reads `destination.size()` bytes starting at `offset` into `destination`.
+  // Returns OutOfRangeError if `offset + destination.size()` is greater than
+  // `size()`.
   //
   // Implementation must be thread-safe and support concurrent invocations with
   // arbitrary arguments.
-  virtual absl::Status PRead(
-      size_t offset, size_t num_bytes,
-      absl::FunctionRef<bool(absl::string_view piece)> callback) const = 0;
+  virtual absl::Status PRead(size_t offset,
+                             absl::Span<char> destination) const = 0;
 
   // Helper functions.
 

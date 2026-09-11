@@ -40,9 +40,8 @@ class StringPReadFile : public PReadFile {
 
   size_t size() const override { return content_.size(); };
 
-  absl::Status PRead(
-      size_t offset, size_t num_bytes,
-      absl::FunctionRef<bool(absl::string_view)> callback) const override;
+  absl::Status PRead(size_t offset,
+                     absl::Span<char> destination) const override;
 
  private:
   std::string content_;

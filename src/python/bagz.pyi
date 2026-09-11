@@ -367,3 +367,7 @@ class Writer:
   def __exit__(
       self, exc_type: object, exc_value: object, traceback: object
   ) -> None: ...
+
+FILESYSTEM_ABI_VERSION: int
+
+def _get_registry_capsule(plugin_abi_version: int = ...) -> object: ...

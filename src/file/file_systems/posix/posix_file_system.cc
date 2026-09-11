@@ -16,7 +16,6 @@
 
 #include <fcntl.h>
 #include <glob.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -30,11 +29,11 @@
 
 #include "absl/base/nullability.h"
 #include "absl/cleanup/cleanup.h"
-#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "src/file/file_system/file_system.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/shard_spec.h"
@@ -43,71 +42,47 @@
 namespace bagz {
 namespace {
 
-class MmapDeleter {
- public:
-  explicit MmapDeleter(size_t mmap_size) : mmap_size_(mmap_size) {}
-  void operator()(const void* mmap) const {
-    munmap(const_cast<void*>(mmap), mmap_size_);
-  }
-  size_t mmap_size() const { return mmap_size_; }
-
- private:
-  size_t mmap_size_;
-};
-
-using MmapUniquePtr = std::unique_ptr<void, MmapDeleter>;
-
-absl::StatusOr<MmapUniquePtr> MmapFile(const std::string& filename) {
-  int fd = open(filename.c_str(), O_RDONLY);
-  if (fd < 0) {
-    return absl::ErrnoToStatus(errno, "open");
-  }
-  struct stat stat;
-  if (fstat(fd, &stat) < 0) {
-    close(fd);
-    return absl::ErrnoToStatus(errno, "fstat");
-  }
-
-  // We cannot mmap an empty file but we can use an empty string_view.
-  if (stat.st_size == 0) {
-    close(fd);
-    return MmapUniquePtr(nullptr, MmapDeleter(0));
-  }
-
-  void* records_mmap =
-      mmap(/*addr=*/nullptr, /*length=*/stat.st_size, /*prot=*/PROT_READ,
-           /*flags=*/MAP_SHARED, /*fd=*/fd, /*offset=*/0);
-  close(fd);
-  if (records_mmap == MAP_FAILED) {
-    // kNotFound is confusing for user for ENODEV.
-    if (errno == ENODEV) {
-      return absl::PermissionDeniedError("mmap");
-    } else {
-      return absl::ErrnoToStatus(errno, "mmap");
-    }
-  }
-  return MmapUniquePtr(records_mmap, MmapDeleter(stat.st_size));
-}
-
 class PosixPReadFile : public PReadFile {
  public:
-  explicit PosixPReadFile(MmapUniquePtr mmap) : mmap_(std::move(mmap)) {}
-  size_t size() const override { return mmap_.get_deleter().mmap_size(); }
+  PosixPReadFile(int fd, size_t size) : fd_(fd), size_(size) {}
+  ~PosixPReadFile() override {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
 
-  absl::Status PRead(
-      size_t offset, size_t num_bytes,
-      absl::FunctionRef<bool(absl::string_view)> callback) const override {
-    size_t mmap_size = size();
-    if (num_bytes > mmap_size || offset > mmap_size - num_bytes) {
+  size_t size() const override { return size_; }
+
+  absl::Status PRead(size_t offset,
+                     absl::Span<char> destination) const override {
+    size_t num_bytes = destination.size();
+    if (num_bytes > size_ || offset > size_ - num_bytes) {
       return absl::OutOfRangeError("Invalid read");
     }
-    callback(absl::string_view(static_cast<const char*>(mmap_.get()) + offset,
-                               num_bytes));
+    char* dest = destination.data();
+    size_t remaining = num_bytes;
+    size_t cur_offset = offset;
+    while (remaining > 0) {
+      ssize_t bytes_read = pread(fd_, dest, remaining, cur_offset);
+      if (bytes_read < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        return absl::ErrnoToStatus(errno, "pread failed");
+      }
+      if (bytes_read == 0) {
+        return absl::OutOfRangeError("Unexpected EOF");
+      }
+      dest += bytes_read;
+      remaining -= bytes_read;
+      cur_offset += bytes_read;
+    }
     return absl::OkStatus();
   }
 
  private:
-  MmapUniquePtr mmap_;
+  int fd_;
+  size_t size_;
 };
 
 class PosixWriteFile : public WriteFile {
@@ -182,11 +157,21 @@ absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>>
 PosixFileSystem::OpenPRead(absl::string_view filename,
                            absl::string_view options) const {
   std::string filename_str(filename);
-  absl::StatusOr<MmapUniquePtr> mmap = MmapFile(filename_str.c_str());
-  if (!mmap.ok()) {
-    return mmap.status();
+  int fd = open(filename_str.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return absl::ErrnoToStatus(errno, "open");
   }
-  return std::make_unique<PosixPReadFile>(*std::move(mmap));
+  struct stat stat;
+  if (fstat(fd, &stat) < 0) {
+    close(fd);
+    return absl::ErrnoToStatus(errno, "fstat");
+  }
+  if (S_ISDIR(stat.st_mode)) {
+    close(fd);
+    return absl::InvalidArgumentError(
+        absl::StrCat("Cannot open directory '", filename, "' as file"));
+  }
+  return std::make_unique<PosixPReadFile>(fd, stat.st_size);
 }
 
 absl::Status PosixFileSystem::Delete(absl::string_view filename,

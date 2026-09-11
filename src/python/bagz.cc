@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stdexcept>
+
+#include "absl/strings/str_format.h"
 #include "src/file/registry/file_system_registry.h"
 #include "src/python/bagz_index.h"
 #include "src/python/bagz_multi_index.h"
@@ -33,9 +36,22 @@ NB_MODULE(bagz, m) {
   RegisterBagzReader(m);
   RegisterBagzWriter(m);
 
-  m.def("_get_registry_capsule", []() {
-    return nb::capsule(&FileSystemRegistry::Instance(), "FileSystemRegistry");
-  });
+  m.attr("FILESYSTEM_ABI_VERSION") = kFileSystemAbiVersion;
+
+  m.def(
+      "_get_registry_capsule",
+      [](int plugin_abi_version) {
+        if (plugin_abi_version != kFileSystemAbiVersion) {
+          throw std::runtime_error(absl::StrFormat(
+              "Incompatible bagz filesystem ABI: plugin was built with ABI %d, "
+              "but bagz core provides ABI %d. Please update or rebuild the "
+              "plugin.",
+              plugin_abi_version, kFileSystemAbiVersion));
+        }
+        return nb::capsule(&FileSystemRegistry::Instance(),
+                           "FileSystemRegistry");
+      },
+      nb::arg("plugin_abi_version") = 1);
 
   // Shim to allow `from bagz import bagz` for backward compatibility.
   m.attr("bagz") = m;

@@ -58,13 +58,7 @@ class InMemoryPReadFile : public PReadFile {
 
   void InitOnce() {
     data_ = std::make_unique_for_overwrite<char[]>(data_size_);
-    char* data = data_.get();
-    status_ =
-        pread_file_->PRead(0, data_size_, [&data](absl::string_view piece) {
-          std::memcpy(data, piece.data(), piece.size());
-          data += piece.size();
-          return true;
-        });
+    status_ = pread_file_->PRead(0, absl::MakeSpan(data_.get(), data_size_));
     pread_file_.reset();
     if (!status_.ok()) {
       data_ = nullptr;
@@ -73,16 +67,18 @@ class InMemoryPReadFile : public PReadFile {
 
   size_t size() const override { return data_size_; }
 
-  absl::Status PRead(size_t offset, size_t num_bytes,
-                     absl::FunctionRef<bool(absl::string_view piece)> callback)
-      const override {
+  absl::Status PRead(size_t offset,
+                     absl::Span<char> destination) const override {
     absl::call_once(once_, &InMemoryPReadFile::InitOnce,
                     const_cast<InMemoryPReadFile*>(this));
     if (!status_.ok()) {
       return status_;
     }
-    callback(
-        absl::string_view(data_.get(), data_size_).substr(offset, num_bytes));
+    if (destination.size() > data_size_ ||
+        offset > data_size_ - destination.size()) {
+      return absl::OutOfRangeError("PRead out of range");
+    }
+    std::memcpy(destination.data(), data_.get() + offset, destination.size());
     return absl::OkStatus();
   }
 

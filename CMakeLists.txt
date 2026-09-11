@@ -79,6 +79,7 @@ bagz_cc_library(
     absl::strings
     absl::status
     absl::statusor
+    absl::span
     absl::flat_hash_map
     absl::log
     absl::synchronization
@@ -107,6 +108,7 @@ bagz_cc_library(
   DEPS
     absl::flat_hash_map
     absl::log
+    absl::span
     absl::status
     absl::statusor
     absl::strings
@@ -202,6 +204,7 @@ bagz_cc_library(
   DEPS
     absl::flat_hash_map
     absl::log
+    absl::span
     absl::status
     absl::statusor
     absl::strings
@@ -231,6 +234,7 @@ if(ENABLE_CORE)
       absl::status
       absl::statusor
       absl::strings
+      absl::str_format
       bagz_core
   )
 endif()
@@ -263,6 +267,7 @@ file(WRITE ${CMAKE_BINARY_DIR}/__init__.py [[# Copyright 2025 Google LLC
 # limitations under the License.
 
 from bagz.lib.bagz import *
+from bagz.lib.bagz import _get_registry_capsule
 
 import importlib.metadata
 import logging

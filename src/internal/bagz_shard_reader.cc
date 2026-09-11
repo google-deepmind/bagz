@@ -37,14 +37,9 @@ namespace {
 
 absl::Status ReadIntoUint64(PReadFile& file, size_t offset,
                             absl::Span<uint64_t> value) {
-  char* write_buffer = reinterpret_cast<char*>(value.data());
   absl::Status status =
-      file.PRead(offset, value.size() * sizeof(uint64_t),
-                 [&write_buffer](absl::string_view chunk) {
-                   std::memcpy(write_buffer, chunk.data(), chunk.size());
-                   write_buffer += chunk.size();
-                   return true;
-                 });
+      file.PRead(offset, absl::MakeSpan(reinterpret_cast<char*>(value.data()),
+                                        value.size() * sizeof(uint64_t)));
   if constexpr (std::endian::native == std::endian::big) {
     if (status.ok()) {
       for (uint64_t& value : value) {
@@ -96,27 +91,14 @@ absl::Status BagzShardReader::ReadFromByteRange(
     callback(absl::string_view{});
     return absl::OkStatus();
   }
-  std::string partial;
-  size_t num_remaining_bytes = byte_range.length;
-  return records_->PRead(
-      byte_range.offset, byte_range.length,
-      [&num_remaining_bytes, &partial, &callback](absl::string_view chunk) {
-        if (chunk.size() == num_remaining_bytes) {
-          if (partial.empty()) {
-            callback(chunk);
-          } else {
-            partial.append(chunk);
-            callback(partial);
-          }
-        } else {
-          if (partial.empty()) {
-            partial.reserve(num_remaining_bytes);
-          }
-          partial.append(chunk);
-          num_remaining_bytes -= chunk.size();
-        }
-        return true;
-      });
+  auto buffer = std::make_unique_for_overwrite<char[]>(byte_range.length);
+  if (absl::Status status = records_->PRead(
+          byte_range.offset, absl::MakeSpan(buffer.get(), byte_range.length));
+      !status.ok()) {
+    return status;
+  }
+  callback(absl::string_view(buffer.get(), byte_range.length));
+  return absl::OkStatus();
 }
 
 absl::Status BagzShardReader::Read(
@@ -193,41 +175,18 @@ absl::Status BagzShardReader::ReadFromLimits(
     return absl::OkStatus();
   }
 
-  size_t result_index = 0;
-  std::string partial;
+  auto buffer = std::make_unique_for_overwrite<char[]>(num_bytes);
   if (absl::Status status = records_->PRead(
-          limits.front(), num_bytes,
-          [&](absl::string_view chunk) {
-            while (!chunk.empty()) {
-              size_t record_size =
-                  (limits[result_index + 1] - limits[result_index]) -
-                  partial.size();
-              if (record_size > chunk.size()) {
-                partial += std::string(chunk);
-                return true;
-              }
-              if (!partial.empty()) {
-                partial.append(chunk.substr(0, record_size));
-                if (!callback(result_index, partial)) {
-                  return false;
-                }
-                partial.clear();
-              } else {
-                if (!callback(result_index, chunk.substr(0, record_size))) {
-                  return false;
-                }
-              }
-              chunk.remove_prefix(record_size);
-              ++result_index;
-            }
-            return true;
-          });
+          limits.front(), absl::MakeSpan(buffer.get(), num_bytes));
       !status.ok()) {
     return status;
   }
-  // Tail empty records will not be included in PRead.
-  for (; result_index + 1 < limits.size(); ++result_index) {
-    if (!callback(result_index, absl::string_view{})) {
+
+  const uint64_t base_offset = limits.front();
+  for (size_t i = 0; i + 1 < limits.size(); ++i) {
+    const uint64_t start = limits[i] - base_offset;
+    const uint64_t end = limits[i + 1] - base_offset;
+    if (!callback(i, absl::string_view(buffer.get() + start, end - start))) {
       break;
     }
   }

@@ -24,8 +24,8 @@ namespace {
 NB_MODULE(bagz_gcs, m) {
   namespace nb = nanobind;
   nb::module_ bagz_lib = nb::module_::import_("bagz.lib.bagz");
-  nb::capsule cap =
-      nb::cast<nb::capsule>(bagz_lib.attr("_get_registry_capsule")());
+  nb::capsule cap = nb::cast<nb::capsule>(
+      bagz_lib.attr("_get_registry_capsule")(kFileSystemAbiVersion));
   FileSystemRegistry* registry = static_cast<FileSystemRegistry*>(cap.data());
 
   static absl::NoDestructor<GcsFileSystem> gcs_fs;
