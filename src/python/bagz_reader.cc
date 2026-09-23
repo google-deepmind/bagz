@@ -14,6 +14,7 @@
 
 #include "src/bagz_reader.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -268,15 +269,21 @@ bool AnyOf(BagzReader reader, CallBack&& callback) {
 constexpr char kIndexOfDoc[] = R"(
 Returns the index of the first occurrence of the given value in the reader.
 
+Searches from start (inclusive) to stop (exclusive), or the end of the reader
+if stop is omitted. The returned index is relative to the full reader.
+
 Raises a ValueError if the value is not found.
 )";
 
 size_t IndexOf(const BagzReader& reader, nb::bytes value, size_t start,
                std::optional<size_t> stop) {
   absl::string_view bytes((const char*)value.data(), value.size());
+  const size_t end = std::min(stop.value_or(reader.size()), reader.size());
+  if (start >= end) {
+    throw nb::value_error("value is not in the bagz.Reader");
+  }
   size_t index = start;
-  auto reader_slice =
-      reader.Slice(start, 1, stop.value_or(reader.size() - start));
+  auto reader_slice = reader.Slice(start, 1, end - start);
   ThrowNonOkStatusAsException(reader_slice.status());
   if (!AnyOf(*std::move(reader_slice),
              [bytes, &index](absl::string_view record) {
