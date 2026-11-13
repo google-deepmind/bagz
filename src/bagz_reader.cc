@@ -374,7 +374,8 @@ absl::StatusOr<std::string> BagzReader::operator[](size_t index) const {
 
 absl::StatusOr<std::vector<std::string>> BagzReader::ReadRange(
     size_t start, size_t num_records) const {
-  if (start + num_records > slice_length_) {
+  // Use overflow-safe subtraction check for range bounds.
+  if (start > slice_length_ || num_records > slice_length_ - start) {
     return absl::OutOfRangeError(
         absl::StrCat("Range [", start, ", ", start + num_records,
                      ") out of range [0, ", slice_length_, "]"));
@@ -464,7 +465,8 @@ absl::Status BagzReader::ReadRangeWithAllocator(
     size_t start, size_t num_records,
     absl::FunctionRef<absl::Span<char>(size_t result_index, size_t record_size)>
         allocate_for_index) const {
-  if (start + num_records > slice_length_) {
+  // Use overflow-safe subtraction check for range bounds.
+  if (start > slice_length_ || num_records > slice_length_ - start) {
     return absl::OutOfRangeError(
         absl::StrCat("Range ", start, ", ", start + num_records,
                      " out of range [0, ", slice_length_, "]"));
@@ -669,24 +671,34 @@ absl::StatusOr<BagzReader> BagzReader::Slice(size_t start, int64_t step,
       return absl::OutOfRangeError(absl::StrCat(
           "start (", start, ") must be in range [0, ", num_records, ")"));
     }
+    // Use overflow-safe division bounds check and avoid INT64_MIN
+    // negation UB.
     if (step > 0) {
-      if (start + step * (length - 1) + 1 > num_records) {
+      if (length - 1 > (num_records - 1 - start) / static_cast<size_t>(step)) {
         return absl::OutOfRangeError(absl::StrCat(
             "(start: ", start, " + step: ", step, " * length: ", length,
             ") must be less than size: ", num_records));
       }
     } else {
       // step < 0.
-      if (start < -step * (length - 1)) {
+      const uint64_t abs_step = static_cast<uint64_t>(-(step + 1)) + 1;
+      if (length - 1 > start / abs_step) {
         return absl::OutOfRangeError(absl::StrCat(
             "(start: ", start, ", step: ", step, ", length: ", length,
             ") doesn't fit in [0, ", num_records, ")"));
       }
     }
   }
+  if (length == 0) {
+    return BagzReader(state_, /*slice_start=*/0, /*slice_step=*/1,
+                      /*slice_length=*/0);
+  }
   start = slice_start_ + start * slice_step_;
-  step *= slice_step_;
-  return BagzReader(state_, length != 0 ? start : 0, step, length);
+  if (__builtin_mul_overflow(step, slice_step_, &step)) {
+    return absl::OutOfRangeError(absl::StrCat(
+        "Chained slice step overflow (", step, " * ", slice_step_, ")"));
+  }
+  return BagzReader(state_, start, step, length);
 }
 
 const BagzReader::Options& BagzReader::options() const {
