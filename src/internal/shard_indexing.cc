@@ -159,6 +159,11 @@ std::vector<ShardRange> ShardRangeFromConcatated(
 std::vector<ShardRange> ShardRangeFromInterleaved(
     absl::Span<const size_t> accumulated_count, size_t global_index_start,
     size_t count) {
+  // Guard against empty accumulated_count or zero count before dividing
+  // by num_shards.
+  if (count == 0 || accumulated_count.empty()) {
+    return {};
+  }
   size_t num_shards_required = std::min(count, accumulated_count.size());
   std::vector<ShardRange> ranges;
   ranges.reserve(num_shards_required);
