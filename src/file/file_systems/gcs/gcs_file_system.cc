@@ -16,16 +16,18 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <ios>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
-#include "absl/base/no_destructor.h"
 #include "absl/base/nullability.h"
+#include "absl/base/thread_annotations.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -33,11 +35,16 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/strip.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/time.h"
 #include "absl/types/span.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/shard_spec.h"
 #include "src/file/file_system/write_file.h"
 #include "src/internal/parallel_do.h"
+#include "google/cloud/credentials.h"
+#include "google/cloud/internal/rest_options.h"
+#include "google/cloud/options.h"
 #include "google/cloud/status.h"
 #include "google/cloud/status_or.h"
 #include "google/cloud/storage/client.h"
@@ -46,6 +53,8 @@
 #include "google/cloud/storage/object_metadata.h"
 #include "google/cloud/storage/object_read_stream.h"
 #include "google/cloud/storage/object_write_stream.h"
+#include "google/cloud/storage/options.h"
+#include "google/cloud/storage/retry_policy.h"
 #include "google/cloud/storage/upload_options.h"
 #include "google/cloud/storage/well_known_parameters.h"
 
@@ -53,9 +62,102 @@ namespace bagz {
 namespace {
 
 constexpr int kMaxParallelism = 100;
+constexpr absl::Duration kDefaultRetryTimeout = absl::Seconds(15);
+constexpr absl::Duration kDefaultStallTimeout = absl::Seconds(15);
+constexpr absl::Duration kAuthStallTimeout = absl::Seconds(5);
+constexpr absl::Duration kInitialBackoff = absl::Milliseconds(250);
+constexpr absl::Duration kMaxBackoff = absl::Seconds(2);
+constexpr double kBackoffScaling = 2.0;
 
 namespace gc = ::google::cloud;
 namespace gcs = gc::storage;
+
+gcs::Client MakeDefaultClient() {
+  auto options =
+      gc::Options{}
+          .set<gcs::RetryPolicyOption>(
+              gcs::LimitedTimeRetryPolicy(
+                  absl::ToChronoSeconds(kDefaultRetryTimeout))
+                  .clone())
+          .set<gcs::BackoffPolicyOption>(
+              gcs::ExponentialBackoffPolicy(
+                  absl::ToChronoMilliseconds(kInitialBackoff),
+                  absl::ToChronoSeconds(kMaxBackoff), kBackoffScaling)
+                  .clone())
+          .set<gcs::TransferStallTimeoutOption>(
+              absl::ToChronoSeconds(kDefaultStallTimeout))
+          .set<gcs::DownloadStallTimeoutOption>(
+              absl::ToChronoSeconds(kDefaultStallTimeout));
+
+  if (std::getenv("CLOUD_STORAGE_EMULATOR_ENDPOINT") == nullptr &&
+      std::getenv("CLOUD_STORAGE_TESTBENCH_ENDPOINT") == nullptr) {
+    auto auth_options =
+        gc::Options{}
+            .set<gc::rest_internal::DownloadStallTimeoutOption>(
+                absl::ToChronoSeconds(kAuthStallTimeout))
+            .set<gc::rest_internal::DownloadStallMinimumRateOption>(1)
+            .set<gc::rest_internal::TransferStallTimeoutOption>(
+                absl::ToChronoSeconds(kAuthStallTimeout))
+            .set<gc::rest_internal::TransferStallMinimumRateOption>(1);
+    options.set<gc::UnifiedCredentialsOption>(
+        gc::MakeGoogleDefaultCredentials(std::move(auth_options)));
+  }
+
+  return gcs::Client(std::move(options));
+}
+
+// Returns true for auth, credential, or transport errors where discarding the
+// cached client allows a subsequent retry (e.g. after authenticating in Colab
+// or recovering network access) to re-evaluate credentials and connections.
+bool ShouldResetClient(const gc::Status& status) {
+  switch (status.code()) {
+    case gc::StatusCode::kDeadlineExceeded:
+    case gc::StatusCode::kInvalidArgument:
+    case gc::StatusCode::kPermissionDenied:
+    case gc::StatusCode::kUnauthenticated:
+    case gc::StatusCode::kUnavailable:
+    case gc::StatusCode::kUnknown:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+
+namespace gcs_internal {
+
+class ClientProvider {
+ public:
+  explicit ClientProvider(GcsFileSystem::ClientFactory client_factory)
+      : client_factory_(std::move(client_factory)) {}
+
+  gcs::Client GetClient() ABSL_LOCKS_EXCLUDED(mutex_) {
+    absl::MutexLock lock(mutex_);
+    if (!client_.has_value()) {
+      client_.emplace(client_factory_ != nullptr ? client_factory_()
+                                                 : MakeDefaultClient());
+    }
+    return *client_;
+  }
+
+  void ResetClient(const gcs::Client& failed_client)
+      ABSL_LOCKS_EXCLUDED(mutex_) {
+    absl::MutexLock lock(mutex_);
+    if (client_.has_value() && *client_ == failed_client) {
+      client_.reset();
+    }
+  }
+
+ private:
+  GcsFileSystem::ClientFactory client_factory_;
+  absl::Mutex mutex_;
+  std::optional<gcs::Client> client_ ABSL_GUARDED_BY(mutex_);
+};
+
+}  // namespace gcs_internal
+
+namespace {
 
 struct BucketObject {
   const std::string bucket;
@@ -74,14 +176,15 @@ absl::Status ConvertStatus(gc::Status status) {
 // won't be able to access it.
 class GcsPReadFile : public PReadFile {
  public:
-  explicit GcsPReadFile(gcs::Client* absl_nonnull client,
-                        absl::string_view bucket_name,
-                        absl::string_view object_name, size_t size)
-      : client_(client),
+  explicit GcsPReadFile(
+      absl_nonnull std::shared_ptr<gcs_internal::ClientProvider>
+          client_provider,
+      absl::string_view bucket_name, absl::string_view object_name, size_t size)
+      : client_provider_(std::move(client_provider)),
         bucket_name_(bucket_name),
         object_name_(object_name),
         size_(size) {
-    CHECK(client_ != nullptr);
+    CHECK(client_provider_ != nullptr);
   }
   size_t size() const override { return size_; }
 
@@ -102,12 +205,16 @@ class GcsPReadFile : public PReadFile {
       return absl::OkStatus();
     }
 
-    gcs::ObjectReadStream reader = client_->ReadObject(
+    gcs::Client client = client_provider_->GetClient();
+    gcs::ObjectReadStream reader = client.ReadObject(
         bucket_name_, object_name_, gcs::ReadRange(offset, offset + num_bytes));
 
     reader.read(destination.data(), num_bytes);
 
     if (!reader.status().ok()) {
+      if (ShouldResetClient(reader.status())) {
+        client_provider_->ResetClient(client);
+      }
       return ConvertStatus(reader.status());
     }
     if (reader.bad() ||
@@ -123,7 +230,8 @@ class GcsPReadFile : public PReadFile {
   const std::string& Name() const { return object_name_; }
 
  private:
-  gcs::Client* absl_nonnull const client_;
+  const absl_nonnull std::shared_ptr<gcs_internal::ClientProvider>
+      client_provider_;
   const std::string bucket_name_;
   const std::string object_name_;
   const size_t size_;
@@ -131,25 +239,37 @@ class GcsPReadFile : public PReadFile {
 
 class GcsWriteFile : public WriteFile {
  public:
-  explicit GcsWriteFile(gcs::ObjectWriteStream&& writer)
-      : writer_(std::move(writer)) {}
+  explicit GcsWriteFile(
+      absl_nonnull std::shared_ptr<gcs_internal::ClientProvider>
+          client_provider,
+      gcs::Client client, gcs::ObjectWriteStream&& writer)
+      : client_provider_(std::move(client_provider)),
+        client_(std::move(client)),
+        writer_(std::move(writer)) {}
 
   absl::Status Write(absl::string_view data) override {
     writer_.write(data.data(), data.size());
-    return ConvertStatus(writer_.last_status());
+    return HandleStatus(writer_.last_status());
   }
   absl::Status Flush() override {
     writer_.flush();
-    return ConvertStatus(writer_.last_status());
+    return HandleStatus(writer_.last_status());
   }
   absl::Status Close() override {
     writer_.Close();
-    return ConvertStatus(writer_.last_status());
+    return HandleStatus(writer_.last_status());
   }
 
  private:
-  absl::Status Status() const { return ConvertStatus(writer_.last_status()); }
+  absl::Status HandleStatus(const gc::Status& status) {
+    if (ShouldResetClient(status)) {
+      client_provider_->ResetClient(client_);
+    }
+    return ConvertStatus(status);
+  }
 
+  absl_nonnull std::shared_ptr<gcs_internal::ClientProvider> client_provider_;
+  gcs::Client client_;
   gcs::ObjectWriteStream writer_;
 };
 
@@ -171,31 +291,30 @@ BucketObject BucketAndObjectName(absl::string_view filename) {
 }
 }  // namespace
 
-gcs::Client* absl_nonnull GcsFileSystem::Client() const {
-  // We need to lazilly build the gcs::Client as the GRPC implementation require
-  // GoogleInit.
-  ClientFactory client_factory = client_factory_;
-  if (client_factory == nullptr) {
-    client_factory = [] { return google::cloud::storage::Client(); };
-  }
-  static absl::NoDestructor<gcs::Client> client(client_factory());
-  return client.get();
-}
+GcsFileSystem::GcsFileSystem(ClientFactory client_factory)
+    : client_provider_(std::make_shared<gcs_internal::ClientProvider>(
+          std::move(client_factory))) {}
+
 absl::StatusOr<absl_nonnull std::unique_ptr<WriteFile>>
 GcsFileSystem::OpenWrite(absl::string_view filename_without_prefix,
                          uint64_t offset, absl::string_view options) const {
   const BucketObject bucket_object =
       BucketAndObjectName(filename_without_prefix);
+  gcs::Client client = client_provider_->GetClient();
 
   gcs::ObjectWriteStream writer =
-      Client()->WriteObject(bucket_object.bucket, bucket_object.object,
-                            gc::storage::UploadFromOffset(offset));
+      client.WriteObject(bucket_object.bucket, bucket_object.object,
+                         gc::storage::UploadFromOffset(offset));
 
   if (!writer.last_status().ok()) {
+    if (ShouldResetClient(writer.last_status())) {
+      client_provider_->ResetClient(client);
+    }
     return ConvertStatus(writer.last_status());
   }
 
-  return std::make_unique<GcsWriteFile>(std::move(writer));
+  return std::make_unique<GcsWriteFile>(client_provider_, std::move(client),
+                                        std::move(writer));
 }
 
 absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>>
@@ -203,16 +322,19 @@ GcsFileSystem::OpenPRead(absl::string_view filename_without_prefix,
                          absl::string_view options) const {
   const BucketObject bucket_object =
       BucketAndObjectName(filename_without_prefix);
-  gcs::Client* absl_nonnull client = Client();
+  gcs::Client client = client_provider_->GetClient();
 
   gc::StatusOr<gcs::ObjectMetadata> metadata =
-      client->GetObjectMetadata(bucket_object.bucket, bucket_object.object);
+      client.GetObjectMetadata(bucket_object.bucket, bucket_object.object);
 
   if (!metadata.ok()) {
+    if (ShouldResetClient(metadata.status())) {
+      client_provider_->ResetClient(client);
+    }
     return ConvertStatus(metadata.status());
   }
 
-  return std::make_unique<GcsPReadFile>(client, bucket_object.bucket,
+  return std::make_unique<GcsPReadFile>(client_provider_, bucket_object.bucket,
                                         bucket_object.object, metadata->size());
 }
 
@@ -220,8 +342,13 @@ absl::Status GcsFileSystem::Delete(absl::string_view filename_without_prefix,
                                    absl::string_view options) const {
   const BucketObject bucket_object =
       BucketAndObjectName(filename_without_prefix);
-  return ConvertStatus(
-      Client()->DeleteObject(bucket_object.bucket, bucket_object.object));
+  gcs::Client client = client_provider_->GetClient();
+  gc::Status status =
+      client.DeleteObject(bucket_object.bucket, bucket_object.object);
+  if (ShouldResetClient(status)) {
+    client_provider_->ResetClient(client);
+  }
+  return ConvertStatus(std::move(status));
 }
 
 absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
@@ -232,12 +359,13 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
 
   std::vector<std::vector<std::unique_ptr<GcsPReadFile>>> files_per_shard_spec(
       expanded_filespec.size());
-  gcs::Client* client = Client();
+  const gcs::Client shared_client = client_provider_->GetClient();
 
   if (absl::Status status = internal::ParallelDo(
           expanded_filespec.size(),
-          [&expanded_filespec, &files_per_shard_spec,
-           &client](size_t filespec_index) -> absl::Status {
+          [this, &expanded_filespec, &files_per_shard_spec,
+           &shared_client](size_t filespec_index) -> absl::Status {
+            gcs::Client client = shared_client;
             absl::string_view filespec = expanded_filespec[filespec_index];
             std::string pattern;
             if (absl::string_view::size_type pos = filespec.rfind("@*");
@@ -253,7 +381,7 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
             }
 
             const BucketObject bucket_object = BucketAndObjectName(pattern);
-            gcs::ListObjectsReader list_objects = client->ListObjects(
+            gcs::ListObjectsReader list_objects = client.ListObjects(
                 bucket_object.bucket, gcs::MatchGlob(bucket_object.object));
 
             std::vector<std::unique_ptr<GcsPReadFile>>& files =
@@ -261,12 +389,15 @@ GcsFileSystem::BulkOpenPRead(absl::string_view filespec_without_prefix,
             std::vector<std::string> file_names;
             for (gc::StatusOr<gcs::ObjectMetadata> metadata : list_objects) {
               if (!metadata.ok()) {
+                if (ShouldResetClient(metadata.status())) {
+                  client_provider_->ResetClient(client);
+                }
                 return ConvertStatus(metadata.status());
               }
 
               file_names.emplace_back(metadata->name());
               files.push_back(std::make_unique<GcsPReadFile>(
-                  client, metadata->bucket(), metadata->name(),
+                  client_provider_, metadata->bucket(), metadata->name(),
                   metadata->size()));
             }
 

@@ -151,9 +151,12 @@ if(ENABLE_GCS)
     HEADERS ${bagz_file_system_gcs_headers}
     DEPS
       absl::log
+      absl::span
       absl::status
       absl::statusor
       absl::strings
+      absl::synchronization
+      absl::time
       bagz_file_system
       bagz_internal
       google-cloud-cpp::storage

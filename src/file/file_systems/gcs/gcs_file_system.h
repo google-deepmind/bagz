@@ -16,6 +16,7 @@
 #define BAGZ_SRC_FILE_FILE_SYSTEMS_GCS_GCS_FILE_SYSTEM_H_
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -31,13 +32,15 @@
 
 namespace bagz {
 
-// An implementation of FileSystem to read file in GCS. This uses the tensorflow
-// GCS filesystem library.
+namespace gcs_internal {
+class ClientProvider;
+}  // namespace gcs_internal
+
+// An implementation of FileSystem to read file in GCS.
 class GcsFileSystem : public FileSystem {
  public:
-  using ClientFactory = google::cloud::storage::Client (*)();
-  explicit GcsFileSystem(ClientFactory client_factory = nullptr)
-      : client_factory_(client_factory) {}
+  using ClientFactory = std::function<google::cloud::storage::Client()>;
+  explicit GcsFileSystem(ClientFactory client_factory = nullptr);
 
  protected:
   // Open a GCS object for reading.
@@ -70,8 +73,7 @@ class GcsFileSystem : public FileSystem {
                 absl::string_view options) const override;
 
  private:
-  google::cloud::storage::Client* absl_nonnull Client() const;
-  ClientFactory client_factory_;
+  absl_nonnull std::shared_ptr<gcs_internal::ClientProvider> client_provider_;
 };
 
 }  // namespace bagz
