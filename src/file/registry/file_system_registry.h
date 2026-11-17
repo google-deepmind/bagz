@@ -15,6 +15,7 @@
 #ifndef BAGZ_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
 #define BAGZ_SRC_FILE_REGISTRY_FILE_SYSTEM_REGISTRY_H_
 
+#include <memory>
 #include <string>
 
 #include "absl/base/nullability.h"
@@ -24,6 +25,8 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
+#include "src/file/file_system/c_file_system.h"
+#include "src/file/file_system/c_file_system_abi.h"
 #include "src/file/file_system/file_system.h"
 
 namespace bagz {
@@ -31,7 +34,7 @@ namespace bagz {
 // Result of resolving a filename_with_prefix to a file system and filename.
 struct ResolvedFile {
   // The file system that handles the file.
-  FileSystem* absl_nonnull file_system;
+  absl_nonnull std::shared_ptr<FileSystem> file_system;
 
   // The filename without the prefix.
   absl::string_view filename;
@@ -80,6 +83,26 @@ class FileSystemRegistry {
   absl::Status Register(absl::string_view prefix, FileSystem& file_system)
       ABSL_LOCKS_EXCLUDED(mutex_);
 
+  // Registers an owned file system for a given `prefix`. The registry retains
+  // a shared reference until `Unregister(prefix)` is called; any in-flight
+  // operations that already resolved `prefix` keep the instance alive until
+  // they complete.
+  //
+  // Thread-safe.
+  absl::Status Register(absl::string_view prefix,
+                        absl_nonnull std::unique_ptr<FileSystem> file_system)
+      ABSL_LOCKS_EXCLUDED(mutex_);
+
+  // Validates `c_file_system` (including `abi_version == kFileSystemAbiVersion`
+  // and `struct_size`), wraps it as a `FileSystem`, and registers it for
+  // `prefix`. If registration fails for any reason, `c_file_system` is left
+  // untouched.
+  //
+  // Thread-safe.
+  absl::Status Register(absl::string_view prefix,
+                        void* absl_nullable raw_c_file_system)
+      ABSL_LOCKS_EXCLUDED(mutex_);
+
   // Unregisters a file system for a given prefix. Returns an error if the
   // prefix is not registered.
   //
@@ -87,10 +110,14 @@ class FileSystemRegistry {
   absl::Status Unregister(absl::string_view prefix) ABSL_LOCKS_EXCLUDED(mutex_);
 
  private:
+  absl::Status RegisterLocked(
+      absl::string_view prefix,
+      absl_nonnull std::shared_ptr<FileSystem> file_system)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   mutable absl::Mutex mutex_;
 
-  absl::flat_hash_map<std::string, FileSystem* absl_nonnull> file_systems_
-      ABSL_GUARDED_BY(mutex_);
+  absl::flat_hash_map<std::string, absl_nonnull std::shared_ptr<FileSystem>>
+      file_systems_ ABSL_GUARDED_BY(mutex_);
 };
 
 }  // namespace bagz

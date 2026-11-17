@@ -35,7 +35,7 @@ classifiers = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-GCS = ["bagz-gcs"]
+GCS = ["bagz-gcs>=2.0.0"]
 
 [project.urls]
 "Homepage" = "https://github.com/google-deepmind/bagz"
@@ -73,6 +73,9 @@ repair-wheel-command = "auditwheel repair --strip -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "11.0"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
 
 [tool.uv.sources]
 bagz-gcs = { path = "plugins/gcs" }

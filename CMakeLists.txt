@@ -79,6 +79,7 @@ bagz_cc_library(
     absl::strings
     absl::status
     absl::statusor
+    absl::span
     absl::flat_hash_map
     absl::log
     absl::synchronization
@@ -86,12 +87,15 @@ bagz_cc_library(
 )
 
 set(bagz_file_system_sources
+  "src/file/file_system/c_file_system.cc"
   "src/file/file_system/file_system.cc"
   "src/file/file_system/pread_file.cc"
   "src/file/file_system/shard_spec.cc"
   "src/file/file_system/string_pread_file.cc"
 )
 set(bagz_file_system_headers
+  "src/file/file_system/c_file_system.h"
+  "src/file/file_system/c_file_system_abi.h"
   "src/file/file_system/file_system.h"
   "src/file/file_system/mock_file_system.h"
   "src/file/file_system/pread_file.h"
@@ -107,6 +111,7 @@ bagz_cc_library(
   DEPS
     absl::flat_hash_map
     absl::log
+    absl::span
     absl::status
     absl::statusor
     absl::strings
@@ -202,6 +207,7 @@ bagz_cc_library(
   DEPS
     absl::flat_hash_map
     absl::log
+    absl::span
     absl::status
     absl::statusor
     absl::strings
@@ -219,7 +225,6 @@ set(bagz_python_sources
   "src/python/bagz_writer.cc"
 )
 
-option(ENABLE_CORE "Enable Core bagz extension" ON)
 if(ENABLE_CORE)
   bagz_nanobind_extension(
     bagz
@@ -231,6 +236,7 @@ if(ENABLE_CORE)
       absl::status
       absl::statusor
       absl::strings
+      absl::str_format
       bagz_core
   )
 endif()
@@ -241,7 +247,7 @@ if(ENABLE_GCS)
     SOURCES "src/file/file_systems/gcs/bagz_gcs.cc"
     DEPS
       bagz_file_system_gcs
-      bagz_file
+      bagz_file_system
       google-cloud-cpp::storage
       absl::log
       absl::status
@@ -276,8 +282,19 @@ def _load_plugins():
   for ep in eps:
     try:
       ep.load()
+    except AttributeError as e:
+      if e.name == '_get_registry_capsule':
+        logging.warning(
+            'Failed to load bagz plugin %s: plugin uses an older '
+            'incompatible ABI; please upgrade bagz-%s (%s)',
+            ep.name,
+            ep.name,
+            e,
+        )
+      else:
+        logging.warning('Failed to load bagz plugin %s: %s', ep.name, e)
     except Exception as e:
-      logging.warning(f"Failed to load bagz plugin {ep.name}: {e}")
+      logging.warning('Failed to load bagz plugin %s: %s', ep.name, e)
 
 _load_plugins()
 ]])
@@ -293,6 +310,19 @@ if(ENABLE_CORE)
     TARGETS bagz
     DESTINATION "bagz/lib"
   )
+
+  install(
+    DIRECTORY "beam/"
+    DESTINATION bagz/beam
+    FILES_MATCHING
+    PATTERN "*.py"
+  )
+
+  install(
+    FILES "src/python/bagz.pyi"
+    DESTINATION "bagz"
+    RENAME "__init__.pyi"
+  )
 endif()
 
 if(ENABLE_GCS)
@@ -301,17 +331,4 @@ if(ENABLE_GCS)
     DESTINATION "bagz_gcs"
   )
 endif()
-
-install(
-  DIRECTORY "beam/"
-  DESTINATION bagz/beam
-  FILES_MATCHING
-  PATTERN "*.py"
-)
-
-install(
-  FILES "src/python/bagz.pyi"
-  DESTINATION "bagz"
-  RENAME "__init__.pyi"
-)
 

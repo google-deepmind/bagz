@@ -59,6 +59,10 @@ FetchContent_Declare(
   google_cloud_cpp
   URL https://github.com/googleapis/google-cloud-cpp/archive/refs/tags/v2.37.0.tar.gz
   URL_HASH SHA256=10867580483cb338e7d50920c2383698f3572cc6b4c7d072e38d5f43755cbd80
+  # Backport googleapis/google-cloud-cpp#16516 for OpenSSL 4.x constness.
+  PATCH_COMMAND
+    "${Python_EXECUTABLE}" -c
+    "(p := __import__('pathlib').Path('google/cloud/internal/openssl/parse_service_account_p12_file.cc')) and (s := p.read_text()) and (t := s.replace('  X509_NAME* name =', '  const X509_NAME* name =', 1)) and ('const X509_NAME* name =' in t or __import__('sys').exit('OpenSSL 4.x patch failed')) and (s != t and p.write_text(t))"
   EXCLUDE_FROM_ALL
 )
 

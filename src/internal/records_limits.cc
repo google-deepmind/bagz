@@ -44,9 +44,9 @@ class OffsetPReadFileRef : public PReadFile {
 
   size_t size() const override { return size_; };
 
-  absl::Status PRead(
-      size_t offset, size_t num_bytes,
-      absl::FunctionRef<bool(absl::string_view)> callback) const override {
+  absl::Status PRead(size_t offset,
+                     absl::Span<char> destination) const override {
+    size_t num_bytes = destination.size();
     if (num_bytes > size_) {
       return absl::OutOfRangeError(
           absl::StrCat("num_bytes(", num_bytes, " >  file size(", size_, ")"));
@@ -56,7 +56,7 @@ class OffsetPReadFileRef : public PReadFile {
                                                 " >  file size - num_bytes(",
                                                 size_ - num_bytes, ")"));
     }
-    return pread_file_->PRead(offset_ + offset, num_bytes, callback);
+    return pread_file_->PRead(offset_ + offset, destination);
   }
 
  private:
@@ -67,14 +67,9 @@ class OffsetPReadFileRef : public PReadFile {
 
 absl::Status ReadIntoUint64(PReadFile& file, size_t offset,
                             absl::Span<uint64_t> value) {
-  char* write_buffer = reinterpret_cast<char*>(value.data());
   absl::Status status =
-      file.PRead(offset, value.size() * sizeof(uint64_t),
-                 [&write_buffer](absl::string_view chunk) {
-                   std::memcpy(write_buffer, chunk.data(), chunk.size());
-                   write_buffer += chunk.size();
-                   return true;
-                 });
+      file.PRead(offset, absl::MakeSpan(reinterpret_cast<char*>(value.data()),
+                                        value.size() * sizeof(uint64_t)));
   if constexpr (std::endian::native == std::endian::big) {
     if (status.ok()) {
       for (uint64_t& value : value) {

@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -30,11 +31,11 @@
 
 #include "absl/base/nullability.h"
 #include "absl/cleanup/cleanup.h"
-#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "src/file/file_system/file_system.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/shard_spec.h"
@@ -94,15 +95,15 @@ class PosixPReadFile : public PReadFile {
   explicit PosixPReadFile(MmapUniquePtr mmap) : mmap_(std::move(mmap)) {}
   size_t size() const override { return mmap_.get_deleter().mmap_size(); }
 
-  absl::Status PRead(
-      size_t offset, size_t num_bytes,
-      absl::FunctionRef<bool(absl::string_view)> callback) const override {
+  absl::Status PRead(size_t offset,
+                     absl::Span<char> destination) const override {
     size_t mmap_size = size();
-    if (num_bytes > mmap_size || offset > mmap_size - num_bytes) {
+    if (destination.size() > mmap_size ||
+        offset > mmap_size - destination.size()) {
       return absl::OutOfRangeError("Invalid read");
     }
-    callback(absl::string_view(static_cast<const char*>(mmap_.get()) + offset,
-                               num_bytes));
+    std::copy_n(static_cast<const char*>(mmap_.get()) + offset,
+                destination.size(), destination.data());
     return absl::OkStatus();
   }
 

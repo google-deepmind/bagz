@@ -31,6 +31,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
+      SETUPTOOLS_SCM_PRETEND_VERSION: "2.0.0"
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]

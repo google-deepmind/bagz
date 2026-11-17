@@ -27,10 +27,10 @@
 
 #include "testing/base/public/gmock.h"
 #include "absl/base/nullability.h"
-#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "src/file/file_system/file_system.h"
 #include "src/file/file_system/pread_file.h"
 #include "src/file/file_system/string_pread_file.h"
@@ -51,13 +51,13 @@ class MockPReadFile : public StringPReadFile {
 
   // Implementation of the `PRead` that calls the `PReadMock` and then the
   // `StringPReadFile::PRead`.
-  absl::Status PRead(
-      size_t offset, size_t num_bytes,
-      absl::FunctionRef<bool(absl::string_view)> callback) const override {
-    if (absl::Status status = PReadMock(offset, num_bytes); !status.ok()) {
+  absl::Status PRead(size_t offset,
+                     absl::Span<char> destination) const override {
+    if (absl::Status status = PReadMock(offset, destination.size());
+        !status.ok()) {
       return status;
     }
-    return StringPReadFile::PRead(offset, num_bytes, callback);
+    return StringPReadFile::PRead(offset, destination);
   }
 
   // Mock method for `PRead` that allows to injecting errors.

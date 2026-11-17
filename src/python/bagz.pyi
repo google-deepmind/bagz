@@ -367,3 +367,11 @@ class Writer:
   def __exit__(
       self, exc_type: object, exc_value: object, traceback: object
   ) -> None: ...
+
+FILESYSTEM_ABI_VERSION: int
+
+def register_filesystem(prefix: str, filesystem_capsule: object) -> None:
+  """Registers a C-ABI filesystem plugin for the given prefix."""
+
+def unregister_filesystem(prefix: str) -> None:
+  """Unregisters a filesystem previously registered for the given prefix."""

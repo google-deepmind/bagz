@@ -12,21 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 from collections.abc import Iterable, Iterator, Sequence
+import ctypes
+import gc
 import multiprocessing as mp
 import os
 import pathlib
 import pickle  # pylint: disable=pickle-use
 from typing import TypeAlias, TypedDict
+import weakref
 
 from absl.testing import absltest
 from absl.testing import parameterized
 import numpy as np
 
+from examples import in_memory_filesystem
 import bagz
 
 
 _NUM_RECORDS = 20
+_WRONG_CAPSULE_NAME = b'wrong.CapsuleName'
 
 Compression: TypeAlias = (
     bagz.CompressionAutoDetect | bagz.CompressionNone | bagz.CompressionZstd
@@ -548,6 +555,79 @@ class BagTest(parameterized.TestCase):
       )
 
     self.assertEqual(results, records)
+
+  def test_filesystem_abi_version_and_invalid_capsules(self) -> None:
+    self.assertEqual(bagz.FILESYSTEM_ABI_VERSION, 2)
+    with self.assertRaisesRegex(TypeError, 'PyCapsule'):
+      bagz.register_filesystem('bad_fs:', object())
+
+    wrong_name_struct = in_memory_filesystem.BagzCFileSystem(
+        abi_version=bagz.FILESYSTEM_ABI_VERSION,
+        struct_size=ctypes.sizeof(in_memory_filesystem.BagzCFileSystem),
+    )
+    py_capsule_new = ctypes.PYFUNCTYPE(
+        ctypes.py_object, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p
+    )(('PyCapsule_New', ctypes.pythonapi))
+    wrong_name_capsule = py_capsule_new(
+        ctypes.addressof(wrong_name_struct), _WRONG_CAPSULE_NAME, None
+    )
+    with self.assertRaisesRegex(ValueError, 'PyCapsule_GetPointer'):
+      bagz.register_filesystem('bad_fs:', wrong_name_capsule)
+
+    for bad_version in (1, 999):
+      mismatched = in_memory_filesystem.BagzCFileSystem(
+          abi_version=bad_version,
+          struct_size=ctypes.sizeof(in_memory_filesystem.BagzCFileSystem),
+      )
+      capsule = in_memory_filesystem.make_capsule(ctypes.addressof(mismatched))
+      with self.assertRaisesRegex(
+          ValueError, 'Incompatible bagz filesystem ABI'
+      ):
+        bagz.register_filesystem('bad_fs:', capsule)
+
+    valid_header_struct = in_memory_filesystem.BagzCFileSystem(
+        abi_version=bagz.FILESYSTEM_ABI_VERSION,
+        struct_size=ctypes.sizeof(in_memory_filesystem.BagzCFileSystem),
+    )
+    with self.assertRaisesRegex(ValueError, 'must empty or end with'):
+      bagz.register_filesystem(
+          'invalid_prefix',
+          in_memory_filesystem.make_capsule(
+              ctypes.addressof(valid_header_struct)
+          ),
+      )
+
+  def test_register_c_filesystem_roundtrip(self) -> None:
+    mem_fs = in_memory_filesystem.InMemoryCFileSystem()
+    fs_ref = weakref.ref(mem_fs)
+    bagz.register_filesystem('pymem:', mem_fs.make_capsule())
+    del mem_fs
+    gc.collect()
+    self.assertIsNotNone(fs_ref())
+
+    reader = None
+    try:
+      records = list(_generate_records(_NUM_RECORDS))
+      with bagz.Writer('pymem:/data.bagz') as writer:
+        for record in records:
+          writer.write(record)
+
+      reader = bagz.Reader('pymem:/data.bagz')
+    finally:
+      bagz.unregister_filesystem('pymem:')
+
+    # Open Reader retains the C filesystem even after unregistering and dropping
+    # all Python references to InMemoryCFileSystem.
+    gc.collect()
+    self.assertIsNotNone(fs_ref())
+    self.assertIsNotNone(reader)
+    self.assertEqual(list(reader), records)
+    del reader
+    gc.collect()
+    self.assertIsNone(fs_ref())
+
+    with self.assertRaisesRegex(FileNotFoundError, 'No file system registered'):
+      bagz.Reader('pymem:/data.bagz')
 
 
 def _read_worker_helper(reader: bagz.Reader, idx: int) -> bytes:

@@ -19,22 +19,17 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/string_view.h"
-#include "absl/utility/utility.h"
+#include "absl/types/span.h"
 
 namespace bagz {
 
 absl::StatusOr<std::string> PReadFile::PReadToString(size_t offset,
                                                      size_t num_bytes) const {
-  absl::StatusOr<std::string> result(absl::in_place);
-  result->reserve(num_bytes);
-  absl::Status status =
-      PRead(offset, num_bytes, [&result](absl::string_view piece) {
-        result->append(piece);
-        return true;
-      });
+  std::string result;
+  result.resize(num_bytes);
+  absl::Status status = PRead(offset, absl::MakeSpan(result));
   if (!status.ok()) {
-    result = status;
+    return status;
   }
   return result;
 }

@@ -13,9 +13,9 @@
 // limitations under the License.
 
 #include "absl/base/no_destructor.h"
-#include "absl/log/absl_check.h"
+#include "src/file/file_system/c_file_system.h"
+#include "src/file/file_system/c_file_system_abi.h"
 #include "src/file/file_systems/gcs/gcs_file_system.h"
-#include "src/file/registry/file_system_registry.h"
 #include "nanobind/nanobind.h"
 
 namespace bagz {
@@ -23,13 +23,12 @@ namespace {
 
 NB_MODULE(bagz_gcs, m) {
   namespace nb = nanobind;
-  nb::module_ bagz_lib = nb::module_::import_("bagz.lib.bagz");
-  nb::capsule cap =
-      nb::cast<nb::capsule>(bagz_lib.attr("_get_registry_capsule")());
-  FileSystemRegistry* registry = static_cast<FileSystemRegistry*>(cap.data());
-
   static absl::NoDestructor<GcsFileSystem> gcs_fs;
-  ABSL_CHECK_OK(registry->Register("gs:", *gcs_fs));
+  static BagzCFileSystem c_gcs_fs = ToCFileSystem(*gcs_fs);
+
+  nb::capsule cap(&c_gcs_fs, kBagzCFileSystemCapsuleName);
+  nb::module_ bagz_lib = nb::module_::import_("bagz.lib.bagz");
+  bagz_lib.attr("register_filesystem")("gs:", cap);
 }
 
 }  // namespace

@@ -110,9 +110,10 @@ BulkOpenPRead(absl::string_view file_spec_with_prefix,
               absl::string_view options) {
   // Group files by prefix. Only groups files with contiguous prefixes. To
   // save book keeping.
-  std::vector<std::pair<FileSystem*, std::vector<absl::string_view>>>
+  std::vector<
+      std::pair<std::shared_ptr<FileSystem>, std::vector<absl::string_view>>>
       filenames_from_prefix;
-  FileSystem* last_file_system = nullptr;
+  std::shared_ptr<FileSystem> last_file_system = nullptr;
   const FileSystemRegistry& registry = FileSystemRegistry::Instance();
   for (const auto& file_spec :
        absl::StrSplit(file_spec_with_prefix, ',', absl::SkipEmpty())) {

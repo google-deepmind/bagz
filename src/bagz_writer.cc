@@ -28,6 +28,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "src/bagz_options.h"
 #include "src/file/file.h"
 #include "src/file/file_system/pread_file.h"
@@ -45,18 +46,23 @@ constexpr size_t kAppendBufferSize = 1024ull * 128ull;  // 128 KiB.
 
 // Appends the contents of `src` to the end of `dst`.
 absl::Status AppendSourceToDest(PReadFile& src, WriteFile& dst) {
-  absl::Status write_status = absl::OkStatus();
-  for (std::size_t offset = 0; offset < src.size();
-       offset += kAppendBufferSize) {
-    size_t length = std::min(kAppendBufferSize, src.size() - offset);
-    absl::Status read_status =
-        src.PRead(offset, length, [&](absl::string_view buffer) {
-          write_status = dst.Write(buffer);
-          return write_status.ok();
-        });
-    read_status.Update(write_status);
-    if (!read_status.ok()) {
-      return read_status;
+  const size_t src_size = src.size();
+  const size_t buffer_size = std::min(kAppendBufferSize, src_size);
+  if (buffer_size == 0) {
+    return absl::OkStatus();
+  }
+  auto buffer = std::make_unique_for_overwrite<char[]>(buffer_size);
+  for (std::size_t offset = 0; offset < src_size; offset += kAppendBufferSize) {
+    size_t length = std::min(kAppendBufferSize, src_size - offset);
+    if (absl::Status status =
+            src.PRead(offset, absl::MakeSpan(buffer.get(), length));
+        !status.ok()) {
+      return status;
+    }
+    if (absl::Status status =
+            dst.Write(absl::string_view(buffer.get(), length));
+        !status.ok()) {
+      return status;
     }
   }
   return absl::OkStatus();
