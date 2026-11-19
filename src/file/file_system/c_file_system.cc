@@ -28,6 +28,7 @@
 #include <new>
 #endif
 
+#include "absl/base/attributes.h"
 #include "absl/base/nullability.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/status/status.h"
@@ -362,13 +363,16 @@ class WrappedCPReadFile final : public PReadFile {
   WrappedCPReadFile(std::shared_ptr<SharedCFileSystem> fs_state,
                     BagzCPReadFile c_file)
       : fs_state_(std::move(fs_state)), c_file_(c_file) {}
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   ~WrappedCPReadFile() override { c_file_.vtable->destroy(c_file_.file); }
 
   WrappedCPReadFile(const WrappedCPReadFile&) = delete;
   WrappedCPReadFile& operator=(const WrappedCPReadFile&) = delete;
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   size_t size() const override { return c_file_.vtable->size(c_file_.file); }
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   absl::Status PRead(size_t offset,
                      absl::Span<char> destination) const override {
     char empty_byte = 0;
@@ -390,11 +394,13 @@ class WrappedCWriteFile final : public WriteFile {
   WrappedCWriteFile(std::shared_ptr<SharedCFileSystem> fs_state,
                     BagzCWriteFile c_file)
       : fs_state_(std::move(fs_state)), c_file_(c_file) {}
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   ~WrappedCWriteFile() override { c_file_.vtable->destroy(c_file_.file); }
 
   WrappedCWriteFile(const WrappedCWriteFile&) = delete;
   WrappedCWriteFile& operator=(const WrappedCWriteFile&) = delete;
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   absl::Status Write(absl::string_view data) override {
     BagzCError error{};
     int32_t code = c_file_.vtable->write(c_file_.file, NullableData(data),
@@ -408,6 +414,7 @@ class WrappedCWriteFile final : public WriteFile {
     return FromCResult(code, error);
   }
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   absl::Status Close() override {
     BagzCError error{};
     int32_t code = c_file_.vtable->close(c_file_.file, &error);
@@ -497,6 +504,7 @@ class WrappedCFileSystem final : public FileSystem {
   WrappedCFileSystem(const WrappedCFileSystem&) = delete;
   WrappedCFileSystem& operator=(const WrappedCFileSystem&) = delete;
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   absl::StatusOr<absl_nonnull std::unique_ptr<PReadFile>> OpenPRead(
       absl::string_view filename_without_prefix,
       absl::string_view options) const override {
@@ -518,6 +526,7 @@ class WrappedCFileSystem final : public FileSystem {
     return std::make_unique<WrappedCPReadFile>(state_, c_file);
   }
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   absl::StatusOr<absl_nonnull std::unique_ptr<WriteFile>> OpenWrite(
       absl::string_view filename_without_prefix, uint64_t offset,
       absl::string_view options) const override {
@@ -539,6 +548,7 @@ class WrappedCFileSystem final : public FileSystem {
     return std::make_unique<WrappedCWriteFile>(state_, c_file);
   }
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   absl::Status Delete(absl::string_view filename_without_prefix,
                       absl::string_view options) const override {
     const BagzCFileSystem& c_fs = state_->c_fs;
@@ -550,6 +560,7 @@ class WrappedCFileSystem final : public FileSystem {
     return FromCResult(code, error);
   }
 
+  ABSL_ATTRIBUTE_NO_SANITIZE_CFI
   absl::StatusOr<std::vector<absl_nonnull std::unique_ptr<PReadFile>>>
   BulkOpenPRead(absl::string_view filespec_without_prefix,
                 absl::string_view options) const override {
@@ -613,6 +624,7 @@ BagzCFileSystem ToCFileSystem(
   return c_fs;
 }
 
+ABSL_ATTRIBUTE_NO_SANITIZE_CFI
 void DestroyCFileSystem(BagzCFileSystem* absl_nullable c_file_system) {
   if (c_file_system != nullptr && c_file_system->destroy != nullptr) {
     c_file_system->destroy(c_file_system->ctx);
